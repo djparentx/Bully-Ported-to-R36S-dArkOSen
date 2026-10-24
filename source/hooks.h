@@ -49,7 +49,7 @@ void alFilteriHook(ALuint filter, ALenum param, ALint value);
 void alGenFiltersHook(ALsizei n, ALuint *filters);
 ALboolean alIsFilterHook(ALuint filter);
 
-// EGL initialization for Switch - must be called before game starts
+// EGL initialization - must be called before game starts
 int NVEventEGLInit(void);
 
 // SDL2 KMSDRM video (hooks/opengl.c)

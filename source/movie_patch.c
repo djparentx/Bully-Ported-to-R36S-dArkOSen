@@ -1,4 +1,4 @@
-/* movie_patch.c -- Video playback for movies (STUBS for Switch)
+/* movie_patch.c -- Video playback for movies (stubs: no movie playback yet)
  *
  * Copyright (C) 2026 givethesourceplox, Andy Nguyen
  *

@@ -176,10 +176,8 @@ int main(void)
   extern FILE *stdin_fake;
   stdin_fake = stdin;
 
-  // Resolve all symbol addresses BEFORE so_finalize.
-  // After svcMapProcessCodeMemory, the source heap pages become Perm_None
-  // and so_find_addr (which reads syms/dynstrtab from text_base) will crash.
-  // Use so_find_addr_rx to get the executable text_virtbase address.
+  // Resolve symbol addresses before so_finalize(). so_find_addr_rx gives the
+  // executable text_virtbase address (on Linux the same mapping as text_base).
   extern void jni_init(void);
   jni_init(); // sets up fake_vm and resolves JNI_OnLoad address
 

@@ -574,8 +574,8 @@ static const char *ActionTreeDecoder_decodeStringRef_hook(void *this_ptr)
 // ============================================================================
 // Stack canary binary patch — Android ARM64 uses TLS-based stack canaries:
 // mrs Xn, tpidr_el0; ldr Xt, [Xn, #0x28] to load __stack_chk_guard.
-// On Switch, tpidr_el0+0x28 is inside the IPC buffer that gets clobbered
-// by every service call, causing canary mismatches → __stack_chk_fail → crash.
+// Under glibc, tpidr_el0+0x28 is ordinary TLS data that can change between a
+// function's entry and exit, causing canary mismatches → __stack_chk_fail → crash.
 // Fix: scan the binary for all 'bl __stack_chk_fail' call sites and NOP
 // the guarding b.ne branches so the canary check is effectively disabled.
 // ============================================================================
@@ -1112,21 +1112,21 @@ static void FileReadBuffer_BlockUntilComplete_hook(void *this_ptr)
 // ============================================================================
 // AND_*Initialize debug wrappers / stubs
 // implOnInitialSetup calls these in order. We hook each one to trace progress.
-// Functions that only register JNI method IDs for features not needed on Switch
+// Functions that only register JNI method IDs for features this port doesn't use
 // are stubbed out to avoid potential crashes from JNI dispatch.
 // ============================================================================
 
-// Stubs for subsystems that just register method IDs — not needed on Switch
+// Stubs for subsystems that just register method IDs — not used on this port
 void AND_PlaylistInitialize_hook(void *env) {
-  debugPrintf("AND_PlaylistInitialize_hook: stubbed (not needed on Switch)\n");
+  debugPrintf("AND_PlaylistInitialize_hook: stubbed (not used on this port)\n");
 }
 
 void AND_MiscInitialize_hook(void *env) {
-  debugPrintf("AND_MiscInitialize_hook: stubbed (not needed on Switch)\n");
+  debugPrintf("AND_MiscInitialize_hook: stubbed (not used on this port)\n");
 }
 
 void AND_KeyboardInitialize_hook(void *env) {
-  debugPrintf("AND_KeyboardInitialize_hook: stubbed (not needed on Switch)\n");
+  debugPrintf("AND_KeyboardInitialize_hook: stubbed (not used on this port)\n");
 }
 
 void AND_MovieInitialize_hook(void *env) {
@@ -1215,7 +1215,7 @@ int OS_RockstarCloudUpdate_hook(void) {
 }
 
 int OS_RockstarSignedIn_hook(void) {
-  return 1; // no Java login UI on Switch; force signed-in state to continue
+  return 1; // no Java login UI here; force signed-in state to continue
             // boot
 }
 
@@ -1543,8 +1543,8 @@ void OS_PlaylistSetVolume_hook(float vol) {}
 // recursion. We write the isPhone flag directly at the known .bss offset.
 void AND_SystemInitialize_hook(void *env, void *activity) {
   debugPrintf("AND_SystemInitialize_hook: stubbed (setting isPhone=1)\n");
-  // After so_finalize(), text_base is inaccessible (unmapped by
-  // svcMapProcessCodeMemory). text_virtbase is the runtime mapping base.
+  // text_virtbase is the runtime mapping base (on Linux the same mapping
+  // as text_base).
   // Data/BSS past text_asize is RW.
   extern void *text_virtbase;
   volatile uint32_t *isPhone =
@@ -1584,7 +1584,7 @@ void ExitAndroidGame(int code) {
 }
 
 // OS_ThreadMakeCurrent / OS_ThreadUnmakeCurrent — the game stores EGL objects
-// in internal globals that are never populated on Switch. Hook these to use
+// in internal globals that only the Android Java launcher populates. Hook these to use
 // our known-good EGL display/surface/context directly.
 void OS_ThreadMakeCurrent_hook(void) {
   debugPrintf("OS_ThreadMakeCurrent_hook: acquiring context on thread\n");
@@ -1599,7 +1599,7 @@ void OS_ThreadUnmakeCurrent_hook(void) {
 
 // OS_ScreenSwapBuffers — the original reads EGL display/surface from globals
 // at 0x158a978/0x158a980, which are populated by the Android Java launcher.
-// On Switch those globals are NULL. Hook to use our known-good EGL handles.
+// Nothing populates those globals here. Hook to use our known-good EGL handles.
 static int g_swap_count = 0;
 void OS_ScreenSwapBuffers_hook(void) {
   if (g_swap_count < 5 || (g_swap_count % 300 == 0))
@@ -1728,7 +1728,7 @@ void OS_ThreadWait_hook(void *thread) {
 
 // The 64-bit game's NVThreadSpawnJNIThread worker dereferences
 // pthread_getspecific(key) without null checks during startup, which crashes
-// on Switch when the expected JNI TLS slot is unset. Bypass that wrapper.
+// under this loader when the expected JNI TLS slot is unset. Bypass that wrapper.
 int NVThreadSpawnJNIThread_hook(long *outThread, const pthread_attr_t *attr,
                                 const char *name, void *(*entry)(void *),
                                 void *arg) {
@@ -2129,8 +2129,8 @@ void patch_game(void) {
   hook_arm64(so_find_addr("__cxa_guard_release"),
              (uintptr_t)&__cxa_guard_release);
 
-  // Use Switch-safe thread launcher/wait.
-  // The Android path can fail to spawn engine workers cleanly on 64-bit emu.
+  // Our own thread launcher/wait (native pthreads): the game's Android path
+  // fails to spawn engine workers cleanly under this loader.
   hook_arm64(so_find_addr("_Z15OS_ThreadLaunchPFjPvES_jPKci16OSThreadPriority"),
              (uintptr_t)OS_ThreadLaunch);
   hook_arm64(so_find_addr("_Z13OS_ThreadWaitPv"),
@@ -2140,9 +2140,7 @@ void patch_game(void) {
   // transitions are preserved. jni_start now seeds their internal EGL globals.
 
   // Hook SetGameState to log game state transitions
-  // Pre-resolve MainMenu::UpdateAccess NOW — so_find_addr_rx reads from
-  // text_base which becomes Perm_None after so_finalize, so it cannot be called
-  // at runtime.
+  // Pre-resolve MainMenu::UpdateAccess here, with the other symbol lookups.
   saved_MainMenu_UpdateAccess =
       (void (*)(void *))so_find_addr_rx("_ZN8MainMenu12UpdateAccessEv");
   hook_arm64(
@@ -2173,17 +2171,6 @@ void patch_game(void) {
   // memory budget: lookups and text hooks (vtables are patched after finalize)
   memory_patch_text();
 
-  // --- SYMBOLS BELOW DO NOT EXIST IN 64-BIT libGame.so ---
-  // hook_arm64(so_find_addr("_Z20OS_ServiceAppCommandPKcS0_"),
-  // (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z23OS_ServiceAppCommandIntPKci"),
-  // (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z25OS_ServiceIsWifiAvailablev"),
-  // (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z28OS_ServiceIsNetworkAvailablev"),
-  // (uintptr_t)ret0); hook_arm64(so_find_addr("_Z18OS_ServiceOpenLinkPKc"),
-  // (uintptr_t)ret0);
-
   // don't have movie playback yet
   hook_arm64(so_find_addr("_Z12OS_MoviePlayPKcbbf"), (uintptr_t)ret0);
   hook_arm64(so_find_addr("_Z12OS_MovieStopv"), (uintptr_t)ret0);
@@ -2212,25 +2199,10 @@ void patch_game(void) {
              (uintptr_t)OS_CanGameRender);
   hook_arm64(so_find_addr("_Z18OS_IsGameSuspendedv"),
              (uintptr_t)OS_IsGameSuspended);
-  // Leave the 64-bit build on the JNI callback path for digital buttons.
-  // The direct native gamepad hooks below caused the game to lose button
-  // events entirely while axes still worked.
-  // hook_arm64(so_find_addr("_Z21OS_GamepadIsConnectedjP13OSGamepadType"),
-  //            (uintptr_t)OS_GamepadIsConnected_hook);
-  // hook_arm64(so_find_addr("_Z16OS_GamepadButtonjj"),
-  //            (uintptr_t)OS_GamepadButton_hook);
-  // hook_arm64(so_find_addr("_Z13PadUsesXInputi"),
-  //            (uintptr_t)PadUsesXInput_hook);
-  // hook_arm64(so_find_addr("_Z16LIB_GamepadStateii"),
-  //            (uintptr_t)LIB_GamepadState_hook);
-  // hook_arm64(so_find_addr("_ZN15InputController12GetGBPressedEj13GamepadButton"),
-  //            (uintptr_t)InputController_GetGBPressed_hook);
-  // hook_arm64(so_find_addr("_ZN15InputController9GetGBDownEj13GamepadButton"),
-  //            (uintptr_t)InputController_GetGBDown_hook);
-  // hook_arm64(so_find_addr("_ZN15InputController13GetGBReleasedEj13GamepadButton"),
-  //            (uintptr_t)InputController_GetGBReleased_hook);
+  // Digital buttons stay on the JNI callback path: hooking the native gamepad
+  // functions (OS_GamepadButton and others) lost button events while axes still worked.
 
-  // Hook AND_*Initialize functions — stub out subsystems not needed on Switch.
+  // Hook AND_*Initialize functions — stub out subsystems this port doesn't use.
   // These are called from implOnInitialSetup and only register JNI method IDs
   // for Android features (splash screen, social club, playlists, keyboard,
   // etc.)
@@ -2241,8 +2213,6 @@ void patch_game(void) {
   hook_arm64(so_find_addr("_Z20AND_HapticInitializeP7_JNIEnv"),
              (uintptr_t)AND_HapticInitialize_hook);
   // Leave Rockstar init native for diagnostics (allows original login flow).
-  // hook_arm64(so_find_addr("_Z22AND_RockstarInitializeP7_JNIEnv"),
-  // (uintptr_t)AND_RockstarInitialize_hook);
   hook_arm64(so_find_addr("_Z21AND_DisplayInitializeP7_JNIEnv"),
              (uintptr_t)AND_DisplayInitialize_hook);
   hook_arm64(so_find_addr("_Z22AND_LanguageInitializeP7_JNIEnv"),
@@ -2260,7 +2230,7 @@ void patch_game(void) {
              (uintptr_t)AND_SystemInitialize_hook);
 
   // Keep Rockstar/SC native, but bypass phase wait deadlocks that occur
-  // when Android async callbacks don't line up 1:1 on Switch.
+  // when Android async callbacks don't line up 1:1 under this loader.
   hook_arm64(so_find_addr("_Z16WaitForNextPhase17MULTIPLAYER_PHASE"),
              (uintptr_t)WaitForNextPhase_hook);
 
@@ -2316,8 +2286,7 @@ void patch_game(void) {
   // NvF* wrapper layer — intercept the game's file wrapper API that sits
   // between OS_File* and NvAPK*. This gives us full control and visibility
   // over ALL file I/O. NOTE: NvFInit is only 4 bytes, too small to hook.
-  // hook_arm64(so_find_addr("_Z7NvFInitv"), (uintptr_t)NvFInit_hook);  // TOO
-  // SMALL
+
   hook_arm64(so_find_addr("_Z7NvFOpenPKc"), (uintptr_t)NvFOpen_hook);
   hook_arm64(so_find_addr("_Z12NvFIsApkFilePv"), (uintptr_t)NvFIsApkFile_hook);
   hook_arm64(so_find_addr("_Z8NvFClosePv"), (uintptr_t)NvFClose_hook);
@@ -2329,32 +2298,9 @@ void patch_game(void) {
   hook_arm64(so_find_addr("_Z7NvFGetcPv"), (uintptr_t)NvFGetc_hook);
   hook_arm64(so_find_addr("_Z7NvFGetsPciPv"), (uintptr_t)NvFGets_hook);
 
-  // --- SYMBOLS BELOW DO NOT EXIST IN 64-BIT libGame.so ---
-  // hook_arm64(so_find_addr("_Z13ProcessEventsb"), (uintptr_t)ProcessEvents);
-  // hook_arm64(so_find_addr("_Z25GetAndroidCurrentLanguagev"),
-  // (uintptr_t)GetAndroidCurrentLanguage);
-  // hook_arm64(so_find_addr("_Z25SetAndroidCurrentLanguagei"),
-  // (uintptr_t)SetAndroidCurrentLanguage);
-  // hook_arm64(so_find_addr("_Z14AND_DeviceTypev"), (uintptr_t)AND_DeviceType);
-  // hook_arm64(so_find_addr("_Z16AND_DeviceLocalev"),
-  // (uintptr_t)AND_DeviceLocale);
-  // hook_arm64(so_find_addr("_Z20AND_SystemInitializev"),
-  // (uintptr_t)AND_SystemInitialize);
-  // hook_arm64(so_find_addr("_Z21AND_ScreenSetWakeLockb"), (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z25WarGamepad_GetGamepadTypei"),
-  //            (uintptr_t)WarGamepad_GetGamepadType);
-  // hook_arm64(so_find_addr("_Z28WarGamepad_GetGamepadButtonsi"),
-  //            (uintptr_t)WarGamepad_GetGamepadButtons);
-  // hook_arm64(so_find_addr("_Z25WarGamepad_GetGamepadAxisii"),
-  //            (uintptr_t)WarGamepad_GetGamepadAxis);
-  // hook_arm64(so_find_addr("_Z12VibratePhonei"), (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z14Mobile_Vibratei"), (uintptr_t)ret0);
-  // hook_arm64(so_find_addr("_Z15ExitAndroidGamev"),
-  // (uintptr_t)ExitAndroidGame);
-
-  // Stack canary fix: the binary uses TLS-based canaries (mrs tpidr_el0; ldr
-  // [+0x28]) which fail on Switch because that TLS offset is the IPC buffer.
-  // Disable all checks.
+  // Stack canary fix: the binary uses bionic's TLS canary ([tpidr_el0+0x28]).
+  // Under glibc that slot is ordinary TLS data that can change between a
+  // function's entry and exit. Disable all checks.
   patch_stack_canary();
 
 }

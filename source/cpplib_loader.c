@@ -87,7 +87,7 @@ static void __assert2_stub(const char *file, int line, const char *func, const c
   abort();
 }
 
-// C++ runtime (provided by libsupc++ on Switch)
+// C++ runtime (provided by the host C/C++ runtime)
 extern void *__cxa_atexit;
 extern void __cxa_finalize(void *);
 
@@ -199,7 +199,7 @@ static int cpplib_openat_wrapper(int dirfd, const char *pathname, int flags, ...
     va_end(ap);
   }
 
-  // Most libc++ paths pass AT_FDCWD; emulate that path on Switch.
+  // Most libc++ paths pass AT_FDCWD (or an absolute path); handle those here.
   if (dirfd == AT_FDCWD || (pathname && pathname[0] == '/'))
   {
     if (has_mode)
@@ -323,11 +323,11 @@ static DynLibFunction cpplib_imports[] = {
     {"chdir", (uintptr_t)&chdir},
     {"fchmod", (uintptr_t)&fchmod},
     {"ftruncate", (uintptr_t)&ftruncate},
-    {"ioctl", (uintptr_t)&ret0}, // stub - not available on Switch
+    {"ioctl", (uintptr_t)&ret0}, // stub
 
     // dirent
     {"closedir", (uintptr_t)&closedir},
-    {"fdopendir", (uintptr_t)&ret0}, // stub — not on Switch
+    {"fdopendir", (uintptr_t)&ret0}, // stub
     {"opendir", (uintptr_t)&opendir},
     {"readdir", (uintptr_t)&readdir},
 
@@ -335,7 +335,7 @@ static DynLibFunction cpplib_imports[] = {
     {"mkdir", (uintptr_t)&mkdir},
     {"stat", (uintptr_t)&stat},
     {"lstat", (uintptr_t)&lstat},
-    {"fchmodat", (uintptr_t)&ret0}, // stub — not on Switch
+    {"fchmodat", (uintptr_t)&ret0}, // stub
 
     // pthread
     {"pthread_cond_broadcast", (uintptr_t)&pthread_cond_broadcast},
@@ -623,7 +623,7 @@ int cpplib_load(const char *filename)
         switch (type)
         {
         case R_AARCH64_RELATIVE:
-          // Use virtbase so pointers work after svcMapProcessCodeMemory
+          // Use virtbase: the executable mapping the pointers must refer to
           *ptr = (uintptr_t)cpplib_virtbase + rels[j].r_addend - min_vaddr;
           break;
 

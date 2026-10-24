@@ -147,7 +147,7 @@ static const JniGamepadButtonMap g_jni_gamepad_buttons[] = {
     // 8=NAV_UP, 9=NAV_DOWN, 10=NAV_LEFT, 11=NAV_RIGHT,
     // 12=DPAD_UP, 13=DPAD_DOWN, 14=DPAD_LEFT, 15=DPAD_RIGHT,
     // 16=LEFT_SHOULDER, 17=LEFT_TRIGGER, 18=RIGHT_SHOULDER, 19=RIGHT_TRIGGER.
-    // On Switch, we want the physical D-pad to drive the NAV_* actions
+    // The physical D-pad drives the NAV_* actions
     // (zoom/tasks/objectives) while L3/R3 take over the older DPAD_UP/DOWN
     // gameplay actions (look back / crouch).
     {HidNpadButton_B, 0x1, 0, "south"},
@@ -492,7 +492,7 @@ int InitEGLAndGLES2(void)
     debugPrintf("InitEGLAndGLES2: EGL already initialized, returning success\n");
     return 1;
   }
-  debugPrintf("InitEGLAndGLES2: initializing EGL for Switch...\n");
+  debugPrintf("InitEGLAndGLES2: initializing EGL...\n");
   int result = NVEventEGLInit();
   if (!result)
   {
@@ -578,7 +578,7 @@ int CallBooleanMethodV(void *env, void *obj, int methodID, va_list args)
   case DELETE_FILE:
     return DeleteFile(va_arg(args, char *));
   case ROCKSTAR_IN_TRIAL:
-    // No trial mode on Switch; behave as full game.
+    // No trial mode; behave as full game.
     return 0;
   default:
     debugPrintf("CallBooleanMethodV: unknown methodID %d\n", methodID);
@@ -1231,13 +1231,12 @@ void jni_start(void)
   extern int OS_ScreenGetWidth(void);
   extern int OS_ScreenGetHeight(void);
 
-  debugPrintf("=== BULLY NX BUILD v11 (stack canary fix — disable TLS-based __stack_chk) ===\n");
   debugPrintf_setMainThread();
 
-  // Initialize EGL for Switch BEFORE any game code runs.
+  // Initialize EGL BEFORE any game code runs.
   // The game calls EGL functions directly through the import table,
   // so our display/surface/context must be ready before JNI_OnLoad.
-  debugPrintf("jni_start: initializing EGL for Switch...\n");
+  debugPrintf("jni_start: initializing EGL...\n");
   if (!NVEventEGLInit())
   {
     debugPrintf("jni_start: EGL initialization FAILED!\n");
@@ -1436,7 +1435,7 @@ void jni_start(void)
     }
 
     // Rockstar callback bridge: the native game asks Java to show social/login UI.
-    // On Switch we don't have that Java UI, so when those JNI methods are requested,
+    // There is no Java UI here, so when those JNI methods are requested,
     // deliver the expected native completion callbacks asynchronously from here.
     if (!rockstar_gate_fired && (g_rockstar_pending_initial || g_rockstar_pending_gate) && frame > 30)
     {

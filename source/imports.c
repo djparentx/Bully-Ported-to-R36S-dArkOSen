@@ -45,7 +45,7 @@
 extern uintptr_t __cxa_atexit;
 
 // __stack_chk_fail: make it a no-op so surviving canary checks don't abort
-static void __stack_chk_fail_nop(void) { /* disabled for Switch port */ }
+static void __stack_chk_fail_nop(void) { /* canary checks are disabled: see patch_stack_canary */ }
 
 // C++ ABI runtime - these are provided by libstdc++/libsupc++
 extern void *__cxa_allocate_exception(size_t);
@@ -366,9 +366,9 @@ void free_wrapper(void *ptr)
   if (!ptr)
     return;
 
-  // Switch user-space pointers stay below 48 bits. If upper bits are set,
-  // the caller handed us garbage, often an inline ASCII path blob rather than
-  // a real heap pointer. Skip the free so we don't explode in _free_r.
+  // User-space pointers stay below 48 bits on aarch64 Linux. If upper bits are
+  // set, the caller handed us garbage, often an inline ASCII path blob rather
+  // than a real heap pointer. Skip the free so we don't crash in free().
   if ((p >> 48) != 0)
   {
     if (g_free_guard_logs < 32)
@@ -1155,10 +1155,10 @@ void AAsset_close_wrapper(void *asset_ptr)
 }
 
 // ============================================================================
-// EGL Wrapper Functions for Switch
+// EGL Wrapper Functions
 // These intercept EGL calls from the Android .so and return our pre-initialized
-// EGL objects instead of letting the game try to create them (which would fail
-// because Android native windows don't exist on Switch).
+// EGL objects (the SDL window) instead of letting the game create them, since
+// there is no Android native window here.
 // ============================================================================
 
 static EGLBoolean egl_initialized = EGL_FALSE;
@@ -1341,8 +1341,8 @@ int diag_get_egl_swap_count(void)
 EGLBoolean eglQuerySurface_wrapper(EGLDisplay dpy, EGLSurface surface,
                                    EGLint attribute, EGLint *value)
 {
-  // Workaround for devkitPro mesa bug: eglQuerySurface returns 0 for
-  // EGL_WIDTH/EGL_HEIGHT on Switch.  Return our known screen dimensions.
+  // Report the game's render size (screen_width/height: the scaling FBO when
+  // render_scale < 1), not the window's.
   if (attribute == EGL_WIDTH)
   {
     if (value)
@@ -2168,7 +2168,7 @@ DynLibFunction dynlib_functions[] = {
     {"AAsset_seek", (uintptr_t)&AAsset_seek_wrapper},
     {"AAsset_seek64", (uintptr_t)&AAsset_seek64_wrapper},
 
-    // ANativeWindow wrappers (return Switch NWindow instead of NULL)
+    // ANativeWindow wrappers (return a fake window instead of NULL)
     {"ANativeWindow_fromSurface", (uintptr_t)&ANativeWindow_fromSurface_wrapper},
     {"ANativeWindow_getHeight", (uintptr_t)&ANativeWindow_getHeight_wrapper},
     {"ANativeWindow_getWidth", (uintptr_t)&ANativeWindow_getWidth_wrapper},
