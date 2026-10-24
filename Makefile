@@ -1,253 +1,36 @@
-#---------------------------------------------------------------------------------
-.SUFFIXES:
-#---------------------------------------------------------------------------------
+TARGET   := bully
+BUILD    := build
+SRCDIRS  := source source/hooks
 
-ifeq ($(strip $(DEVKITPRO)),)
-$(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitpro")
-endif
+CFILES   := $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.c))
+CPPFILES := $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.cpp))
+OBJS     := $(patsubst %,$(BUILD)/%.o,$(CFILES) $(CPPFILES))
 
-TOPDIR ?= $(CURDIR)
-include $(DEVKITPRO)/libnx/switch_rules
+# RK3326 = Cortex-A35
+ARCH     := -march=armv8-a+crc -mtune=cortex-a35
+CFLAGS   := -g -O2 -Wall -ffunction-sections $(ARCH) -Isource -MMD -MP
+CXXFLAGS := $(CFLAGS)
+LDFLAGS  := -g $(ARCH)
 
-#---------------------------------------------------------------------------------
-# TARGET is the name of the output
-# BUILD is the directory where object files & intermediate files will be placed
-# SOURCES is a list of directories containing source code
-# DATA is a list of directories containing data files
-# INCLUDES is a list of directories containing header files
-# ROMFS is the directory containing data to be added to RomFS, relative to the Makefile (Optional)
-#
-# NO_ICON: if set to anything, do not use icon.
-# NO_NACP: if set to anything, no .nacp file is generated.
-# APP_TITLE is the name of the app stored in the .nacp file (Optional)
-# APP_AUTHOR is the author of the app stored in the .nacp file (Optional)
-# APP_VERSION is the version of the app stored in the .nacp file (Optional)
-# APP_TITLEID is the titleID of the app stored in the .nacp file (Optional)
-# ICON is the filename of the icon (.jpg), relative to the project folder.
-#   If not set, it attempts to use one of the following (in this order):
-#     - <Project name>.jpg
-#     - icon.jpg
-#     - <libnx folder>/default_icon.jpg
-#
-# CONFIG_JSON is the filename of the NPDM config file (.json), relative to the project folder.
-#   If not set, it attempts to use one of the following (in this order):
-#     - <Project name>.json
-#     - config.json
-#   If a JSON file is provided or autodetected, an ExeFS PFS0 (.nsp) is built instead
-#   of a homebrew executable (.nro). This is intended to be used for sysmodules.
-#   NACP building is skipped as well.
-#---------------------------------------------------------------------------------
-TARGET		:=	$(notdir $(CURDIR))
-APP_TITLE	:=	Bully
-APP_VERSION :=  0.0.2
-APP_AUTHOR  :=  givethesourceplox
-BUILD		:=	build
-SOURCES		:=	source source/hooks
-DATA		:=	data
-INCLUDES	:=	include
-#ROMFS	:=	romfs
+# minizip/zlib static (not guaranteed on device); GL/SDL/AL from device (libMali, SDL2 2.32, OpenAL 1.24)
+LIBS     := -l:libminizip.a -l:libz.a -lSDL2 -lopenal -lEGL -lGLESv2 -lpthread -ldl -lm
 
-#---------------------------------------------------------------------------------
-# options for code generation
-#---------------------------------------------------------------------------------
-ARCH	:=	-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE
+.PHONY: all clean
 
-CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
-			$(ARCH) $(DEFINES)
+all: $(TARGET)
 
-CFLAGS	+=	$(INCLUDE) -D__SWITCH__
+$(TARGET): $(OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-CXXFLAGS	:= $(CFLAGS)
+$(BUILD)/%.c.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
+$(BUILD)/%.cpp.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# Prefer a mounted custom Mesa build when present.
-# Example:
-#   docker run ... -v /path/to/mesa/build:/mesa-new ...
-CUSTOM_MESA_ROOT ?=
-ifeq ($(strip $(CUSTOM_MESA_ROOT)),)
-ifneq ($(wildcard /mesa-new/src/egl/libEGL.a),)
-CUSTOM_MESA_ROOT := /mesa-new
-else ifneq ($(wildcard /mesa-new/build/src/egl/libEGL.a),)
-CUSTOM_MESA_ROOT := /mesa-new/build
-endif
-endif
-
-CUSTOM_MESA_EGL := $(CUSTOM_MESA_ROOT)/src/egl/libEGL.a
-CUSTOM_MESA_GLES := $(firstword $(wildcard $(CUSTOM_MESA_ROOT)/src/mapi/es2api/libGLESv2*.a))
-CUSTOM_MESA_GLAPI := $(CUSTOM_MESA_ROOT)/src/mapi/shared-glapi/libglapi.a
-CUSTOM_MESA_WINSYS := $(firstword $(wildcard $(CUSTOM_MESA_ROOT)/src/gallium/winsys/nouveau/switch/libnouveauwinsys.a))
-CUSTOM_MESA_NOUVEAU := $(firstword $(wildcard $(CUSTOM_MESA_ROOT)/src/gallium/drivers/nouveau/libnouveau.a))
-CUSTOM_MESA_DRM := $(CUSTOM_MESA_ROOT)/libdrm_nouveau/lib/libdrm_nouveau.a
-CUSTOM_MESA_REQUIRED := $(CUSTOM_MESA_EGL) $(CUSTOM_MESA_GLES) $(CUSTOM_MESA_GLAPI) $(CUSTOM_MESA_DRM)
-
-USE_CUSTOM_MESA := 0
-ifneq ($(strip $(CUSTOM_MESA_ROOT)),)
-ifeq ($(strip $(filter-out $(wildcard $(CUSTOM_MESA_REQUIRED)),$(CUSTOM_MESA_REQUIRED))),)
-USE_CUSTOM_MESA := 1
-$(info Using custom Mesa archives from $(CUSTOM_MESA_ROOT))
-else
-$(warning Custom Mesa requested at $(CUSTOM_MESA_ROOT) but required archives are missing; falling back to devkitPro portlibs Mesa)
-endif
-endif
-
-ifeq ($(USE_CUSTOM_MESA),1)
-MESA_LIBS := $(CUSTOM_MESA_EGL) $(CUSTOM_MESA_GLES) $(CUSTOM_MESA_GLAPI) \
-             $(CUSTOM_MESA_WINSYS) $(CUSTOM_MESA_NOUVEAU) $(CUSTOM_MESA_DRM)
-else
-MESA_LIBS := -lEGL -lGLESv2 -lglapi -ldrm_nouveau
-endif
-
-LIBS	:= -lopenal -lSDL2 $(MESA_LIBS) -lminizip -lz -lnx -lm -lzstd
-
-#---------------------------------------------------------------------------------
-# list of directories containing libraries, this must be the top level containing
-# include and lib
-#---------------------------------------------------------------------------------
-LIBDIRS	:= $(PORTLIBS) $(LIBNX)
-
-
-#---------------------------------------------------------------------------------
-# no real need to edit anything past this point unless you need to add additional
-# rules for different file extensions
-#---------------------------------------------------------------------------------
-ifneq ($(BUILD),$(notdir $(CURDIR)))
-#---------------------------------------------------------------------------------
-
-export OUTPUT	:=	$(CURDIR)/$(TARGET)
-export TOPDIR	:=	$(CURDIR)
-
-export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
-			$(foreach dir,$(DATA),$(CURDIR)/$(dir))
-
-export DEPSDIR	:=	$(CURDIR)/$(BUILD)
-
-CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
-SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
-BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
-
-#---------------------------------------------------------------------------------
-# use CXX for linking C++ projects, CC for standard C
-#---------------------------------------------------------------------------------
-export LD	:=	$(CXX)
-
-export OFILES_BIN	:=	$(addsuffix .o,$(BINFILES))
-export OFILES_SRC	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
-export OFILES 	:=	$(OFILES_BIN) $(OFILES_SRC)
-export HFILES_BIN	:=	$(addsuffix .h,$(subst .,_,$(BINFILES)))
-
-export INCLUDE	:=	$(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
-			$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
-			-I$(CURDIR)/$(BUILD)
-
-export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib)
-
-ifeq ($(strip $(CONFIG_JSON)),)
-	jsons := $(wildcard *.json)
-	ifneq (,$(findstring $(TARGET).json,$(jsons)))
-		export APP_JSON := $(TOPDIR)/$(TARGET).json
-	else
-		ifneq (,$(findstring config.json,$(jsons)))
-			export APP_JSON := $(TOPDIR)/config.json
-		endif
-	endif
-else
-	export APP_JSON := $(TOPDIR)/$(CONFIG_JSON)
-endif
-
-ifeq ($(strip $(ICON)),)
-	icons := $(wildcard *.jpg)
-	ifneq (,$(findstring $(TARGET).jpg,$(icons)))
-		export APP_ICON := $(TOPDIR)/$(TARGET).jpg
-	else
-		ifneq (,$(findstring icon.jpg,$(icons)))
-			export APP_ICON := $(TOPDIR)/icon.jpg
-		endif
-	endif
-else
-	export APP_ICON := $(TOPDIR)/$(ICON)
-endif
-
-ifeq ($(strip $(NO_ICON)),)
-	export NROFLAGS += --icon=$(APP_ICON)
-endif
-
-ifeq ($(strip $(NO_NACP)),)
-	export NROFLAGS += --nacp=$(CURDIR)/$(TARGET).nacp
-endif
-
-ifneq ($(APP_TITLEID),)
-	export NACPFLAGS += --titleid=$(APP_TITLEID)
-endif
-
-ifneq ($(ROMFS),)
-	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
-endif
-
-.PHONY: $(BUILD) clean all
-
-#---------------------------------------------------------------------------------
-all: $(BUILD)
-
-$(BUILD):
-	@[ -d $@ ] || mkdir -p $@
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
-
-#---------------------------------------------------------------------------------
 clean:
-	@echo clean ...
-ifeq ($(strip $(APP_JSON)),)
-	@rm -fr $(BUILD) $(TARGET).nro $(TARGET).nacp $(TARGET).elf
-else
-	@rm -fr $(BUILD) $(TARGET).nsp $(TARGET).nso $(TARGET).npdm $(TARGET).elf
-endif
+	rm -rf $(BUILD) $(TARGET)
 
-
-#---------------------------------------------------------------------------------
-else
-.PHONY:	all
-
-DEPENDS	:=	$(OFILES:.o=.d)
-
-#---------------------------------------------------------------------------------
-# main targets
-#---------------------------------------------------------------------------------
-ifeq ($(strip $(APP_JSON)),)
-
-all	:	$(OUTPUT).nro
-
-ifeq ($(strip $(NO_NACP)),)
-$(OUTPUT).nro	:	$(OUTPUT).elf $(OUTPUT).nacp
-else
-$(OUTPUT).nro	:	$(OUTPUT).elf
-endif
-
-else
-
-all	:	$(OUTPUT).nsp
-
-$(OUTPUT).nsp	:	$(OUTPUT).nso $(OUTPUT).npdm
-
-$(OUTPUT).nso	:	$(OUTPUT).elf
-
-endif
-
-$(OUTPUT).elf	:	$(OFILES)
-
-$(OFILES_SRC)	: $(HFILES_BIN)
-
-#---------------------------------------------------------------------------------
-# you need a rule like this for each extension you use as binary data
-#---------------------------------------------------------------------------------
-%.bin.o	%_bin.h :	%.bin
-#---------------------------------------------------------------------------------
-	@echo $(notdir $<)
-	@$(bin2o)
-
--include $(DEPENDS)
-
-#---------------------------------------------------------------------------------------
-endif
-#---------------------------------------------------------------------------------------
+-include $(OBJS:.o=.d)

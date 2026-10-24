@@ -1,0 +1,31 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    container: debian:trixie
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential libsdl2-dev libopenal-dev \
+            libegl-dev libgles-dev libminizip-dev zlib1g-dev
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make -j"$(nproc)"
+
+      - name: Dynamic dependencies
+        run: readelf -d bully | grep NEEDED
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bully-aarch64
+          path: bully
