@@ -3,8 +3,11 @@
  * Copyright (C) 2026 givethesourceplox
  *
  * Opens assets/data_*.zip at init, then serves fopen() requests by
- * extracting matching entries to memory and returning a FILE* via funopen().
+ * extracting matching entries to memory and returning a FILE* via fopencookie().
  */
+
+// fopencookie() and off64_t are GNU extensions; must be defined before any include
+#define _GNU_SOURCE
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -23,7 +26,7 @@ static unzFile s_zips[MAX_ZIPS];
 static int s_zip_count = 0;
 static pthread_mutex_t s_zip_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Memory-backed FILE* via funopen
+// Memory-backed FILE* via fopencookie (glibc's equivalent of funopen)
 typedef struct
 {
   uint8_t *buf;
@@ -31,34 +34,34 @@ typedef struct
   size_t pos;
 } ZipMem;
 
-static int zmf_read(void *cookie, char *out, size_t n)
+static ssize_t zmf_read(void *cookie, char *out, size_t n)
 {
   ZipMem *m = (ZipMem *)cookie;
   size_t avail = m->size - m->pos;
-  if ((size_t)n > avail)
-    n = (int)avail;
+  if (n > avail)
+    n = avail;
   if (n > 0)
   {
     memcpy(out, m->buf + m->pos, n);
     m->pos += n;
   }
-  return n;
+  return (ssize_t)n;
 }
 
-static fpos_t zmf_seek(void *cookie, fpos_t offset, int whence)
+static int zmf_seek(void *cookie, off64_t *offset, int whence)
 {
   ZipMem *m = (ZipMem *)cookie;
-  fpos_t newpos;
+  off64_t newpos;
   switch (whence)
   {
   case SEEK_SET:
-    newpos = offset;
+    newpos = *offset;
     break;
   case SEEK_CUR:
-    newpos = (fpos_t)m->pos + offset;
+    newpos = (off64_t)m->pos + *offset;
     break;
   case SEEK_END:
-    newpos = (fpos_t)m->size + offset;
+    newpos = (off64_t)m->size + *offset;
     break;
   default:
     return -1;
@@ -66,7 +69,8 @@ static fpos_t zmf_seek(void *cookie, fpos_t offset, int whence)
   if (newpos < 0 || (size_t)newpos > m->size)
     return -1;
   m->pos = (size_t)newpos;
-  return newpos;
+  *offset = newpos;
+  return 0;
 }
 
 static int zmf_close(void *cookie)
@@ -143,7 +147,8 @@ FILE *zip_fs_fopen(const char *path)
     m->size = info.uncompressed_size;
     m->pos = 0;
 
-    FILE *f = funopen(m, zmf_read, NULL, zmf_seek, zmf_close);
+    cookie_io_functions_t io = {.read = zmf_read, .write = NULL, .seek = zmf_seek, .close = zmf_close};
+    FILE *f = fopencookie(m, "rb", io);
     if (!f)
     {
       free(buf);
