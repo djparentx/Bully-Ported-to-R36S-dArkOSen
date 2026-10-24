@@ -556,6 +556,34 @@ static void draw_fill(unsigned int tex, int iw, int ih)
   video_draw_tex(tex, 0.0f, 0.0f, (float)s_pw, (float)s_ph, u0, v0, u0 + us, v0 + vs, 0);
 }
 
+// EmulationStation's InvertButtons swaps A/B for everything, PortMaster's
+// mapping included: the button logic stays, only the labels follow it
+static char s_btn_ok = 'A', s_btn_back = 'B';
+
+static int es_buttons_inverted(void)
+{
+  char path[PATH_MAX], line[256];
+  const char *home = getenv("HOME");
+  FILE *f;
+  int inverted = 0;
+
+  snprintf(path, sizeof(path), "%s/.emulationstation/es_settings.cfg",
+           home && home[0] ? home : "/home/ark");
+  f = fopen(path, "r");
+  if (!f)
+    return 0;
+  while (fgets(line, sizeof(line), f) != NULL)
+  {
+    if (strstr(line, "name=\"InvertButtons\""))
+    {
+      inverted = strstr(line, "value=\"true\"") != NULL;
+      break;
+    }
+  }
+  fclose(f);
+  return inverted;
+}
+
 // ---------------------------------------------------------------------------
 // installer screen
 // ---------------------------------------------------------------------------
@@ -567,15 +595,26 @@ typedef struct
   int bar; // 1 = progress bar line
 } UiLine;
 
+static int ui_block_height(const UiLine *lines, int n, int gap)
+{
+  int h = gap; // extra space after the title
+
+  for (int i = 0; i < n; i++)
+    h += lines[i].bar ? lines[i].px + 2 * gap : lines[i].px * 4 / 3;
+  return h;
+}
+
 static void ui_layout_draw(void)
 {
   UiLine lines[8];
-  int n = 0, pct = 0, total_h = 0, y;
-  int title_px = s_ph / 13;
-  int body_px = s_ph / 22;
-  int gap = body_px / 2;
+  int n = 0, pct = 0, total_h, y;
+  int max_w = s_pw * 9 / 10;
+  int max_h = s_ph * 9 / 10;
+  int title_px = s_ph * 2 / 13;
+  int body_px = s_ph / 11;
   int bar_w = s_pw * 6 / 10;
-  int bar_h = s_ph / 30;
+  int bar_h = s_ph / 15;
+  int gap = body_px / 2;
   int state = __atomic_load_n(&s_state, __ATOMIC_ACQUIRE);
 
 #define UI_TEXT(px_, ...)                                                 \
@@ -595,13 +634,13 @@ static void ui_layout_draw(void)
     UI_TEXT(body_px, "%s", "Game data not installed.");
     UI_TEXT(body_px, "%s", "Copy your Bully APK (v1.4.311, arm64) into ports/bully,");
     UI_TEXT(body_px, "%s", "then start the game again.");
-    UI_TEXT(body_px, "%s", "B: exit");
+    UI_TEXT(body_px, "%c: exit", s_btn_back);
     break;
 
   case ST_READY:
     UI_TEXT(body_px, "APK: %.50s", s_apk);
     UI_TEXT(body_px, "Needs %llu MB, %llu MB free", s_total >> 20, s_free >> 20);
-    UI_TEXT(body_px, "%s", "A: install      B: exit");
+    UI_TEXT(body_px, "%c: install      %c: exit", s_btn_ok, s_btn_back);
     break;
 
   case ST_INSTALLING:
@@ -627,35 +666,54 @@ static void ui_layout_draw(void)
 
   case ST_DONE:
     UI_TEXT(body_px, "%s", "Installed.");
-    UI_TEXT(body_px, "%s", "A: launch      B: exit");
+    UI_TEXT(body_px, "%c: launch      %c: exit", s_btn_ok, s_btn_back);
     break;
 
   default:
     UI_TEXT(body_px, "%s", "Setup failed:");
     UI_TEXT(body_px, "%.60s", s_msg);
-    UI_TEXT(body_px, "%s", "B: exit");
+    UI_TEXT(body_px, "%c: exit", s_btn_back);
     break;
   }
 #undef UI_TEXT
 
-  // vertically centered block: title, a gap, then the lines
+  // each line no wider than 90% of the screen
   for (int i = 0; i < n; i++)
-    total_h += lines[i].bar ? bar_h + 2 * gap : lines[i].px * 4 / 3;
-  total_h += gap;
+  {
+    int w;
+
+    if (lines[i].bar)
+      continue;
+    w = text_width(lines[i].text, lines[i].px);
+    if (w > max_w)
+      lines[i].px = lines[i].px * max_w / w;
+  }
+
+  // the whole block no taller than 90% of the screen
+  total_h = ui_block_height(lines, n, gap);
+  if (total_h > max_h)
+  {
+    for (int i = 0; i < n; i++)
+      lines[i].px = lines[i].px * max_h / total_h;
+    gap = gap * max_h / total_h;
+    total_h = ui_block_height(lines, n, gap);
+  }
+
   y = (s_ph - total_h) / 2;
 
   for (int i = 0; i < n; i++)
   {
     if (lines[i].bar)
     {
+      int h = lines[i].px;
       int x = (s_pw - bar_w) / 2;
-      int inset = bar_h / 6 > 1 ? bar_h / 6 : 1;
+      int inset = h / 6 > 1 ? h / 6 : 1;
       int fill = (bar_w - 2 * inset) * pct / 100;
 
       y += gap;
-      ov_rect(x, y, bar_w, bar_h, COL_TRACK, 210);
-      ov_rect(x + inset, y + inset, fill, bar_h - 2 * inset, COL_BLUE, 255);
-      y += bar_h + gap;
+      ov_rect(x, y, bar_w, h, COL_TRACK, 210);
+      ov_rect(x + inset, y + inset, fill, h - 2 * inset, COL_BLUE, 255);
+      y += h + gap;
       continue;
     }
     text_draw((s_pw - text_width(lines[i].text, lines[i].px)) / 2, y, lines[i].px, lines[i].text, COL_GOLD);
@@ -691,6 +749,10 @@ static int ui_init(void)
     return 0;
   s_ov_tex = video_tex_create(s_ov, s_pw, s_ph);
   font_load();
+
+  s_btn_ok = es_buttons_inverted() ? 'B' : 'A';
+  s_btn_back = s_btn_ok == 'A' ? 'B' : 'A';
+  logPrintf("setup: accept button labelled %c\n", s_btn_ok);
 
   img = image_load(APK_BG, APK_BG, &w, &h);
   if (img)
