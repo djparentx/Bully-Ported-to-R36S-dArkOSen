@@ -283,7 +283,6 @@ static int free_wrapper_looks_like_path(const void *ptr, char preview[65])
 {
   const unsigned char *s = (const unsigned char *)ptr;
   int i;
-  int sep = 0;
   int alpha = 0;
   int digits = 0;
   int dots = 0;
@@ -316,9 +315,7 @@ static int free_wrapper_looks_like_path(const void *ptr, char preview[65])
 
     printable++;
 
-    if (c == '/' || c == '\\')
-      sep = 1;
-    else if (isalpha(c))
+    if (isalpha(c))
       alpha = 1;
     else if (isdigit(c))
       digits = 1;
@@ -465,11 +462,6 @@ static void *ndk_stream_ios_base(void *stream)
 
   adjust = *(const intptr_t *)(vtable - 0x18);
   return (char *)stream + adjust;
-}
-
-static int ndk_action_tree_stream_caller(unsigned long long rel)
-{
-  return rel >= 0xa1fc64ull && rel < 0xa20f00ull;
 }
 
 static int ndk_action_tree_basic_ios_dtor_caller(unsigned long long rel)

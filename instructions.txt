@@ -47,6 +47,7 @@ ports/
   - banner.png
   - config.txt           (created on first start)
   - bully.log            (rewritten on every start)
+  - savegames/           (saves and game settings)
   - assets/
     - data_0.zip
     - data_1.zip
@@ -73,7 +74,8 @@ are replaced by the config.txt values on the next start.
 Notes
 - The game folder must contain assets/data_0.zip, or the startup data check
   fails.
-- Save files are stored inside ports/bully/.
+- Saves and the game's settings are stored in ports/bully/savegames/.
+  Saves left in ports/bully/ by older builds are moved there on the next start.
 - While the game runs, the launcher sets the CPU to performance, pins the GPU
   at 520 MHz, and sets zram to 768 MB with swappiness 100. Everything is put
   back on exit.

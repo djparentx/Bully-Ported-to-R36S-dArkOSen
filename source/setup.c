@@ -330,7 +330,7 @@ static void *install_thread(void *arg)
       continue;
 
     pthread_mutex_lock(&s_lock);
-    snprintf(s_current, sizeof(s_current), "%s", name);
+    snprintf(s_current, sizeof(s_current), "%.95s", name); // cut to fit the 96-byte status line
     pthread_mutex_unlock(&s_lock);
 
     if (make_parents(dest) < 0)

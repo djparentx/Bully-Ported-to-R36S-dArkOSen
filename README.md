@@ -85,13 +85,17 @@ If the game is killed (the log ends with `Bully was killed (137)`), it ran out o
 - Lower `clarity` or `shadows`.
 - Reboot before playing. Memory left fragmented by earlier sessions makes this more likely.
 
+## Saves
+
+Saves and the game's own settings are kept in `ports/bully/savegames/`: `BullyFile<N>`, `FileInfo<N>`, `settings.ini` and `storage.ini`. Saves left in `ports/bully/` by older builds are moved there on the next start.
+
 ## Logs
 
 `ports/bully/bully.log` is rewritten on every start. It contains the device and clock settings, display setup, memory events and the exit status. Include it with any bug report.
 
 ## Status
 
-Tested on an RG351MP-class device (rotated 1280x720 panel) running dArkOSen. Other RK3326 devices, including the 640x480 R36S, are expected to work but have not been tested yet.
+Tested on dArkOSen on an R36S (640x480) and an RG351MP-class device (rotated 1280x720 panel). Other RK3326 devices are expected to work.
 
 Movies are not played. The game skips them.
 
