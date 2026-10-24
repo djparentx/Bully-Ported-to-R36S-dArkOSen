@@ -353,11 +353,144 @@ void video_panel_size(int *w, int *h)
   *w = s_panel_w;
   *h = s_panel_h;
 }
+// --- loading screen --------------------------------------------------------
+// The game presents blank frames for a long time while it loads. Until it
+// presents its first frame that draws anything, those frames show the
+// loading screen (setup.c) instead.
+
+static void (*s_loading_draw)(void) = NULL;
+static void (*s_loading_release)(void) = NULL;
+static int s_frame_draws = 0;
+
+void video_set_loading_screen(void (*draw)(void), void (*release)(void))
+{
+  s_loading_release = release;
+  s_loading_draw = draw;
+}
+
+// called by the glDraw* wrappers (render thread)
+void video_note_draw(void)
+{
+  s_frame_draws = 1;
+}
+
+typedef struct
+{
+  GLint enabled, size, type, normalized, stride, buffer;
+  void *pointer;
+} AttribState;
+
+static void attrib_save(GLuint i, AttribState *a)
+{
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &a->enabled);
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_SIZE, &a->size);
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_TYPE, &a->type);
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &a->normalized);
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &a->stride);
+  glGetVertexAttribiv(i, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &a->buffer);
+  glGetVertexAttribPointerv(i, GL_VERTEX_ATTRIB_ARRAY_POINTER, &a->pointer);
+}
+
+static void attrib_restore(GLuint i, const AttribState *a)
+{
+  glBindBuffer(GL_ARRAY_BUFFER, (GLuint)a->buffer);
+  glVertexAttribPointer(i, a->size, (GLenum)a->type, (GLboolean)a->normalized, a->stride, a->pointer);
+  if (a->enabled)
+    glEnableVertexAttribArray(i);
+  else
+    glDisableVertexAttribArray(i);
+}
+
+static void set_cap(GLenum cap, GLboolean on)
+{
+  if (on)
+    glEnable(cap);
+  else
+    glDisable(cap);
+}
+
+// draws the loading screen over the window, with the game's GL state saved
+// before and restored after
+static void video_loading_frame(void)
+{
+  GLint draw_fb, read_fb, vao, abuf, prog, active, tex, vp[4];
+  GLint src_rgb, dst_rgb, src_a, dst_a;
+  GLfloat clear[4];
+  GLboolean mask[4], blend, depth, scissor, cull, stencil;
+  AttribState a0, a1;
+
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+  glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+  glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &abuf);
+  glGetIntegerv(GL_CURRENT_PROGRAM, &prog);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+  glActiveTexture(GL_TEXTURE0);
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_BLEND_SRC_RGB, &src_rgb);
+  glGetIntegerv(GL_BLEND_DST_RGB, &dst_rgb);
+  glGetIntegerv(GL_BLEND_SRC_ALPHA, &src_a);
+  glGetIntegerv(GL_BLEND_DST_ALPHA, &dst_a);
+  glGetFloatv(GL_COLOR_CLEAR_VALUE, clear);
+  glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+  blend = glIsEnabled(GL_BLEND);
+  depth = glIsEnabled(GL_DEPTH_TEST);
+  scissor = glIsEnabled(GL_SCISSOR_TEST);
+  cull = glIsEnabled(GL_CULL_FACE);
+  stencil = glIsEnabled(GL_STENCIL_TEST);
+
+  glBindVertexArray(0);
+  attrib_save(0, &a0);
+  attrib_save(1, &a1);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_STENCIL_TEST);
+
+  video_clear();
+  s_loading_draw();
+
+  attrib_restore(0, &a0);
+  attrib_restore(1, &a1);
+  glBindBuffer(GL_ARRAY_BUFFER, (GLuint)abuf);
+  glBindVertexArray((GLuint)vao);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+  glUseProgram((GLuint)prog);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)tex);
+  glActiveTexture((GLenum)active);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+  glBlendFuncSeparate((GLenum)src_rgb, (GLenum)dst_rgb, (GLenum)src_a, (GLenum)dst_a);
+  glClearColor(clear[0], clear[1], clear[2], clear[3]);
+  glColorMask(mask[0], mask[1], mask[2], mask[3]);
+  set_cap(GL_BLEND, blend);
+  set_cap(GL_DEPTH_TEST, depth);
+  set_cap(GL_SCISSOR_TEST, scissor);
+  set_cap(GL_CULL_FACE, cull);
+  set_cap(GL_STENCIL_TEST, stencil);
+}
 
 // Called on the thread that owns the context (render thread)
 void video_swap(void)
 {
   GLint draw_fb = 0, read_fb = 0;
+
+  // loading screen on the game's blank frames, until its first real frame
+  if (s_loading_draw)
+  {
+    if (!s_frame_draws)
+    {
+      video_loading_frame();
+      SDL_GL_SwapWindow(s_window);
+      return;
+    }
+    logPrintf("video: game is drawing, loading screen off\n");
+    if (s_loading_release)
+      s_loading_release();
+    s_loading_draw = NULL;
+    s_loading_release = NULL;
+  }
 
   if (s_fbo)
   {

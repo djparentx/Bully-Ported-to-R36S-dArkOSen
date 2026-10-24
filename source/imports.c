@@ -1292,6 +1292,7 @@ void glDrawElements_wrapper(GLenum mode, GLsizei count, GLenum type, const void 
   if (gl_draw_count <= 5 || (gl_draw_count % 500 == 0))
     debugPrintf("glDrawElements: mode=0x%x count=%d (call #%d)\n", mode, count, gl_draw_count);
   glDrawElements(mode, count, type, indices);
+  video_note_draw();
 }
 
 void glDrawArrays_wrapper(GLenum mode, GLint first, GLsizei count)
@@ -1300,6 +1301,7 @@ void glDrawArrays_wrapper(GLenum mode, GLint first, GLsizei count)
   if (gl_draw_count <= 5 || (gl_draw_count % 500 == 0))
     debugPrintf("glDrawArrays: mode=0x%x first=%d count=%d (call #%d)\n", mode, first, count, gl_draw_count);
   glDrawArrays(mode, first, count);
+  video_note_draw();
 }
 
 GLuint glCreateShader_wrapper(GLenum type)

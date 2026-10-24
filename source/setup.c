@@ -900,14 +900,76 @@ int setup_run(void)
 }
 
 // ---------------------------------------------------------------------------
-// loading screen: background (centered crop) + banner centered at 60% width
+// loading screen: background (centered crop), banner centered at 60% width,
+// "LOADING..." under it. Drawn once here, then kept on every frame the game
+// presents without drawing anything, until its own frames start.
 // ---------------------------------------------------------------------------
+
+static unsigned int s_sp_bg, s_sp_banner, s_sp_text;
+static int s_sp_bg_w, s_sp_bg_h;
+static float s_sp_bx, s_sp_by, s_sp_bw, s_sp_bh; // banner rectangle
+static float s_sp_tx, s_sp_ty, s_sp_tw, s_sp_th; // text rectangle
+
+static void splash_draw(void)
+{
+  if (s_sp_bg)
+    draw_fill(s_sp_bg, s_sp_bg_w, s_sp_bg_h);
+  if (s_sp_banner)
+    video_draw_tex(s_sp_banner, s_sp_bx, s_sp_by, s_sp_bw, s_sp_bh, 0.0f, 0.0f, 1.0f, 1.0f, 1);
+  if (s_sp_text)
+    video_draw_tex(s_sp_text, s_sp_tx, s_sp_ty, s_sp_tw, s_sp_th, 0.0f, 0.0f, 1.0f, 1.0f, 1);
+}
+
+static void splash_release(void)
+{
+  if (s_sp_bg)
+    video_tex_free(s_sp_bg);
+  if (s_sp_banner)
+    video_tex_free(s_sp_banner);
+  if (s_sp_text)
+    video_tex_free(s_sp_text);
+  s_sp_bg = s_sp_banner = s_sp_text = 0;
+}
+
+// text into its own small texture: the overlay helpers draw into s_ov sized
+// s_pw x s_ph, so they are pointed at a text-sized buffer for this
+static unsigned int splash_text_texture(const char *text, int px, int *tw, int *th)
+{
+  int panel_w = s_pw, panel_h = s_ph;
+  unsigned int tex = 0;
+  int w, h;
+
+  font_load();
+  w = text_width(text, px) + 4;
+  h = px * 4 / 3;
+  s_ov = calloc((size_t)w * h, 4);
+  if (s_ov)
+  {
+    s_pw = w;
+    s_ph = h;
+    text_draw(2, 0, px, text, COL_GOLD);
+    tex = video_tex_create(s_ov, w, h);
+    free(s_ov);
+    s_ov = NULL;
+  }
+  s_pw = panel_w;
+  s_ph = panel_h;
+
+  free(s_font_data);
+  s_font_data = NULL;
+  s_have_font = 0;
+
+  *tw = w;
+  *th = h;
+  return tex;
+}
 
 void splash_show(void)
 {
   unsigned char *bg, *banner;
-  unsigned int bg_tex = 0, banner_tex = 0;
-  int bw = 0, bh = 0, gw = 0, gh = 0;
+  int bw = 0, bh = 0, gw = 0, gh = 0, tw = 0, th = 0;
+  int px, gap, have_bg, have_banner;
+  float group_h;
 
   video_panel_size(&s_pw, &s_ph);
   if (s_pw <= 0 || s_ph <= 0)
@@ -919,43 +981,44 @@ void splash_show(void)
 
   bg = image_load(APK_BG, APK_BG, &bw, &bh);
   banner = image_load(BANNER_NAME, APK_BANNER, &gw, &gh);
+  have_bg = bg != NULL;
+  have_banner = banner != NULL;
 
-  video_clear();
   if (bg)
   {
-    bg_tex = video_tex_create(bg, bw, bh);
-    draw_fill(bg_tex, bw, bh);
+    s_sp_bg = video_tex_create(bg, bw, bh);
+    s_sp_bg_w = bw;
+    s_sp_bg_h = bh;
   }
+
+  px = s_ph / 11; // the installer's body text size
+  gap = px / 2;
+  s_sp_text = splash_text_texture("LOADING...", px, &tw, &th);
+
+  s_sp_bw = s_sp_bh = 0.0f;
   if (banner)
   {
-    float w = (float)s_pw * 0.6f;
-    float h = w * (float)gh / (float)gw;
-    banner_tex = video_tex_create(banner, gw, gh);
-    video_draw_tex(banner_tex, ((float)s_pw - w) * 0.5f, ((float)s_ph - h) * 0.5f, w, h,
-                   0.0f, 0.0f, 1.0f, 1.0f, 1);
+    s_sp_banner = video_tex_create(banner, gw, gh);
+    s_sp_bw = (float)s_pw * 0.6f;
+    s_sp_bh = s_sp_bw * (float)gh / (float)gw;
   }
-  if (!bg && !banner)
-  {
-    // nothing to show: plain text
-    s_ov = calloc((size_t)s_pw * s_ph, 4);
-    if (s_ov)
-    {
-      int px = s_ph / 16;
-      font_load();
-      text_draw((s_pw - text_width("Loading...", px)) / 2, (s_ph - px) / 2, px, "Loading...", COL_GOLD);
-      s_ov_tex = video_tex_create(s_ov, s_pw, s_ph);
-      video_draw_tex(s_ov_tex, 0.0f, 0.0f, (float)s_pw, (float)s_ph, 0.0f, 0.0f, 1.0f, 1.0f, 1);
-    }
-  }
+
+  // banner and text centered on screen as one group
+  group_h = s_sp_bh + (s_sp_banner ? (float)gap : 0.0f) + (float)th;
+  s_sp_bx = ((float)s_pw - s_sp_bw) * 0.5f;
+  s_sp_by = ((float)s_ph - group_h) * 0.5f;
+  s_sp_tw = (float)tw;
+  s_sp_th = (float)th;
+  s_sp_tx = ((float)s_pw - s_sp_tw) * 0.5f;
+  s_sp_ty = s_sp_by + s_sp_bh + (s_sp_banner ? (float)gap : 0.0f);
+
+  video_clear();
+  splash_draw();
   video_present();
 
-  logPrintf("splash: background %s, banner %s\n", bg ? "yes" : "no", banner ? "yes" : "no");
-
-  if (bg_tex)
-    video_tex_free(bg_tex);
-  if (banner_tex)
-    video_tex_free(banner_tex);
   stbi_image_free(bg);
   stbi_image_free(banner);
-  ui_shutdown();
+
+  video_set_loading_screen(splash_draw, splash_release);
+  logPrintf("splash: background %s, banner %s\n", have_bg ? "yes" : "no", have_banner ? "yes" : "no");
 }

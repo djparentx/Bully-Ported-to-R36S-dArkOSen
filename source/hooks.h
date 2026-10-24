@@ -68,6 +68,8 @@ void video_tex_free(unsigned int tex);
 void video_draw_tex(unsigned int tex, float x, float y, float w, float h,
                     float u0, float v0, float u1, float v1, int blend);
 void video_present(void);
+void video_set_loading_screen(void (*draw)(void), void (*release)(void));
+void video_note_draw(void);
 
 // Clean process exit (hooks/game.c)
 void port_exit(int code) __attribute__((noreturn));
