@@ -1012,9 +1012,14 @@ void splash_show(void)
   s_sp_tx = ((float)s_pw - s_sp_tw) * 0.5f;
   s_sp_ty = s_sp_by + s_sp_bh + (s_sp_banner ? (float)gap : 0.0f);
 
-  video_clear();
-  splash_draw();
-  video_present();
+  // presented more than once: a single present doesn't reach the panel
+  // (the installer, which presents every 100 ms, always displays)
+  for (int i = 0; i < 3; i++)
+  {
+    video_clear();
+    splash_draw();
+    video_present();
+  }
 
   stbi_image_free(bg);
   stbi_image_free(banner);
