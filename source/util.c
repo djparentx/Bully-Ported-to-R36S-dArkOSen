@@ -20,7 +20,6 @@
 static pthread_mutex_t s_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t s_main_thread;
 static int s_main_thread_set = 0;
-static int s_compat_delay_ms = 2;
 
 void debugPrintf_setMainThread(void)
 {
@@ -28,43 +27,25 @@ void debugPrintf_setMainThread(void)
   s_main_thread_set = 1;
 }
 
-void debugPrintf_setCompatDelayMs(int ms)
-{
-  if (ms < 0)
-    ms = 0;
-  if (ms > 20)
-    ms = 20;
-  s_compat_delay_ms = ms;
-}
-
-// Verbose tracing: printed only with debug_log 1 in config.txt. The lock and
-// the stall-delay workaround apply either way, since the Switch build's
-// thread timing depended on them.
+// Verbose tracing: printed only with debug_log 1 in config.txt; otherwise
+// returns at once (no lock, no delay)
 int debugPrintf(const char *text, ...)
 {
   va_list list;
   const char *tag = "?";
 
+  if (!config.debug_log)
+    return 0;
+
   if (s_main_thread_set)
     tag = pthread_equal(pthread_self(), s_main_thread) ? "M" : "G";
 
   pthread_mutex_lock(&s_log_mutex);
-
-  if (config.debug_log)
-  {
-    printf("[%s] ", tag);
-    va_start(list, text);
-    vprintf(text, list);
-    va_end(list);
-    fflush(stdout);
-  }
-
-  if (s_compat_delay_ms > 0)
-  {
-    struct timespec ts = {0, (long)s_compat_delay_ms * 1000000L};
-    nanosleep(&ts, NULL);
-  }
-
+  printf("[%s] ", tag);
+  va_start(list, text);
+  vprintf(text, list);
+  va_end(list);
+  fflush(stdout);
   pthread_mutex_unlock(&s_log_mutex);
   return 0;
 }

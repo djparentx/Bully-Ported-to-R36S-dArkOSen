@@ -149,6 +149,8 @@ int video_open(void)
   return 1;
 }
 
+static uint64_t s_game_start_ns = 0; // NVEventEGLInit: start of the load-time measurement
+
 // Game path (jni_start / InitEGLAndGLES2): reuse the window, set the render size, optional FBO
 int NVEventEGLInit(void)
 {
@@ -178,6 +180,7 @@ int NVEventEGLInit(void)
   debugPrintf("GL_EXTENSIONS: %s\n", glGetString(GL_EXTENSIONS));
 
   s_game_ready = 1;
+  s_game_start_ns = mono_ns();
   return 1; // success
 }
 
@@ -475,6 +478,20 @@ static void video_loading_frame(void)
 void video_swap(void)
 {
   GLint draw_fb = 0, read_fb = 0;
+  static int s_drawn_frames = 0, s_load_logged = 0;
+
+  // load time: the game's first 3 frames in a row that draw anything (its
+  // renderer start-up test draws once, then it compiles shaders without drawing)
+  if (!s_load_logged)
+  {
+    s_drawn_frames = s_frame_draws ? s_drawn_frames + 1 : 0;
+    if (s_drawn_frames == 3)
+    {
+      logPrintf("video: game loaded in %.1f s (from its EGL start)\n",
+                (double)(mono_ns() - s_game_start_ns) / 1e9);
+      s_load_logged = 1;
+    }
+  }
 
   // loading screen on the game's blank frames, until its first real frame
   if (s_loading_draw)
@@ -523,6 +540,7 @@ void video_swap(void)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
   }
+  s_frame_draws = 0; // per frame: set again by the next glDraw* call
 }
 
 // SDL tracks the current window per thread; SDL_GL_SwapWindow fails unless the

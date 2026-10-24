@@ -138,8 +138,6 @@ int main(void)
   read_config(CONFIG_NAME);
   write_config(CONFIG_NAME);
 
-  debugPrintf_setCompatDelayMs(0);
-
   // one window for the installer, the splash and the game
   if (!video_open())
     fatal_error("Could not open the display");

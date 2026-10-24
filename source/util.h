@@ -15,7 +15,6 @@
 int debugPrintf(const char *text, ...);
 int logPrintf(const char *text, ...);
 void debugPrintf_setMainThread(void);
-void debugPrintf_setCompatDelayMs(int ms);
 
 int ret0(void);
 int ret1(void);

@@ -1373,17 +1373,9 @@ void jni_start(void)
   int rockstar_gate_fired = 0;
   int forced_gamestate = 0;
   int audio_runtime_enabled = 0;
-  // automatic stall workaround (the old timing_workaround_ms 0 = auto)
-  int compat_auto = 1;
-  int compat_delay_ms = 0;
-  int compat_max_delay_ms = 4;
-  int last_swap_count = 0;
-  uint64_t last_swap_progress_ns = 0;
   uint64_t last_frame_ns = 0;
   last_frame_ns = mono_ns();
-  last_swap_count = diag_get_swap_count();
-  last_swap_progress_ns = last_frame_ns;
-
+  
   while (1)
   {
     uintptr_t asyncHead = *firstAsyncFile_ptr;
@@ -1419,11 +1411,6 @@ void jni_start(void)
       delta = 0.016f; // clamp to sane range
     last_frame_ns = now_ns;
     int swap_count = diag_get_swap_count();
-    if (swap_count != last_swap_count)
-    {
-      last_swap_count = swap_count;
-      last_swap_progress_ns = now_ns;
-    }
 
     if (frame < 10 || (frame % 300 == 0))
       debugPrintf("frame %d gm=%d gs=%d tA=%d tB=%d swp=%d cw=%d cs=%d sem=%d/%d sc=%d async=%p dt=%.3f\n",
@@ -1434,20 +1421,6 @@ void jni_start(void)
                   diag_get_sem_wait_count(), diag_get_sem_post_count(),
                   diag_get_syscall_count(),
                   (void *)asyncHead, delta);
-
-    if (compat_auto &&
-        compat_delay_ms < compat_max_delay_ms &&
-        frame > 120 &&
-        g_gamemain_alive == 1 &&
-        gs >= 0 &&
-        (now_ns - last_swap_progress_ns) > 1000000000ULL)
-    {
-      compat_delay_ms++;
-      debugPrintf_setCompatDelayMs(compat_delay_ms);
-      last_swap_progress_ns = now_ns;
-      debugPrintf("compat auto: swap stall detected (frame=%d gs=%d async=%p swp=%d) -> %d ms\n",
-                  frame, gs, (void *)asyncHead, swap_count, compat_delay_ms);
-    }
 
     if (!audio_runtime_enabled &&
         frame > 240 &&
