@@ -49,8 +49,6 @@ void *memalign_wrapper(size_t alignment, size_t size);
 #define BULLY_SETTINGS_RESET_DISPLAY_PLT_OFFSET 0x117dd60
 #define BULLY_SETTINGS_LOAD_PLT_OFFSET 0x117de40
 
-static uint8_t fake_tls[0x200];
-
 typedef struct
 {
   int game_button;
@@ -1643,9 +1641,6 @@ static void *os_thread_entry(void *data) {
   int is_gamemain = td->is_gamemain;
   free(td);
 
-  uint8_t *tls = calloc(1, 0x200);
-  armSetTlsRw(tls);
-
   // In the 64-bit Bully binary, OS_ThreadIsRunning reads byte 0x69 from
   // the returned handle. It must stay non-zero while the thread is alive,
   // then be cleared when the thread exits.
@@ -2191,7 +2186,4 @@ void patch_game(void) {
   // Disable all checks.
   patch_stack_canary();
 
-  // Still set fake TLS so mrs tpidr_el0 doesn't return 0/garbage (would crash
-  // on ldr)
-  armSetTlsRw(fake_tls);
 }

@@ -26,7 +26,6 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/reent.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <GLES3/gl3.h>
@@ -34,7 +33,6 @@
 #include <AL/alc.h>
 #define AL_ALEXT_PROTOTYPES
 #include <AL/efx.h>
-#include <switch.h>
 #include <malloc.h>
 
 #include "config.h"
@@ -1408,15 +1406,17 @@ void *eglGetProcAddress_wrapper(const char *procname)
 }
 
 // ============================================================================
-// ANativeWindow wrappers for Switch
-// Return the Switch NWindow* so the game's renderer thread sees a valid window.
+// ANativeWindow wrappers
+// The game only hands this window back to eglCreateWindowSurface_wrapper,
+// which ignores it and returns the surface made by NVEventEGLInit.
 // ============================================================================
+
+static int s_fake_native_window;
 
 void *ANativeWindow_fromSurface_wrapper(void *env, void *surface)
 {
-  NWindow *win = nwindowGetDefault();
-  debugPrintf("ANativeWindow_fromSurface_wrapper: returning NWindow %p\n", win);
-  return (void *)win;
+  debugPrintf("ANativeWindow_fromSurface_wrapper: returning fake window %p\n", (void *)&s_fake_native_window);
+  return (void *)&s_fake_native_window;
 }
 
 int ANativeWindow_getWidth_wrapper(void *window)
@@ -1544,7 +1544,45 @@ static void *__emutls_get_address_stub(void *control_raw)
   return ptr;
 }
 
-static char *__ctype_ = (char *)&_ctype_;
+// bionic exports _ctype_ as a pointer to a BSD-style class table: entry 0 is
+// EOF, entry 1+c is the class of c ("C" locale; 0x80-0xFF unclassified).
+// glibc has no such table, so build one (filled by bsd_ctype_init()).
+#define BSD_CTYPE_U 0x01
+#define BSD_CTYPE_L 0x02
+#define BSD_CTYPE_N 0x04
+#define BSD_CTYPE_S 0x08
+#define BSD_CTYPE_P 0x10
+#define BSD_CTYPE_C 0x20
+#define BSD_CTYPE_X 0x40
+#define BSD_CTYPE_B 0x80
+
+static char bsd_ctype_table[1 + 256];
+static char *__ctype_ = bsd_ctype_table;
+
+static void bsd_ctype_init(void)
+{
+  for (int c = 0; c < 128; c++)
+  {
+    unsigned char f = 0;
+    if (isupper(c))
+      f |= BSD_CTYPE_U;
+    if (islower(c))
+      f |= BSD_CTYPE_L;
+    if (isdigit(c))
+      f |= BSD_CTYPE_N;
+    if (isspace(c))
+      f |= BSD_CTYPE_S;
+    if (ispunct(c))
+      f |= BSD_CTYPE_P;
+    if (iscntrl(c))
+      f |= BSD_CTYPE_C;
+    if (isxdigit(c))
+      f |= BSD_CTYPE_X;
+    if (c == ' ')
+      f |= BSD_CTYPE_B;
+    bsd_ctype_table[1 + c] = (char)f;
+  }
+}
 
 // this is supposed to be an array of FILEs, which have a different size in libGame
 // instead use it to determine whether it's trying to print to stdout/stderr
@@ -1555,22 +1593,15 @@ static uint64_t __stack_chk_guard_fake = 0x4242424242424242;
 FILE *stderr_fake = (FILE *)0x1337;
 FILE *stdin_fake = (FILE *)0x1338;
 
-// Math stubs
-void sincosf(float x, float *s, float *c)
-{
-  *s = sinf(x);
-  *c = cosf(x);
-}
+// Math: glibc's libm provides sincos/sincosf. Don't define them here: GCC
+// folds sin()+cos() into a sincos() call, which would recurse into our copy.
+extern void sincosf(float x, float *s, float *c);
+extern void sincos(double x, double *s, double *c);
 
-void sincos(double x, double *s, double *c)
+// Sched stub (own name so it doesn't replace glibc's sched_get_priority_max process-wide)
+static int sched_get_priority_max_stub(int policy)
 {
-  *s = sin(x);
-  *c = cos(x);
-}
-
-// Sched stub
-int sched_get_priority_max(int policy)
-{
+  (void)policy;
   return 0;
 }
 
@@ -1917,7 +1948,9 @@ int pthread_once_fake(volatile int *once_control, void (*init_routine)(void))
   return 0;
 }
 
-// Thread wrapper: each game thread needs its own TPIDR_EL0 buffer for stack guard canary
+// Thread wrapper: catches C++ exceptions escaping a game thread.
+// No fake TPIDR_EL0 on Linux: it is glibc's thread pointer, and the game's
+// stack-canary checks are already patched out (patch_stack_canary).
 typedef struct
 {
   void *(*func)(void *);
@@ -1933,9 +1966,6 @@ static void *pthread_entry_wrapper(void *data)
   void *arg = pd->arg;
   free(pd);
 
-  uint8_t *tls = calloc(1, 0x100);
-  armSetTlsRw(tls);
-
   return thread_guard_run_ptr(func, arg);
 }
 
@@ -1947,6 +1977,18 @@ int pthread_create_fake(pthread_t *thread, const void *unused, void *entry, void
   pd->func = (void *(*)(void *))entry;
   pd->arg = arg;
   return pthread_create(thread, NULL, pthread_entry_wrapper, pd);
+}
+
+// bionic (LP64) pthread_attr_t is 56 bytes; glibc's is 64 and pthread_attr_init
+// clears all 64. glibc's struct pthread_attr ends at byte 56 -> copy 56 back.
+#define BIONIC_PTHREAD_ATTR_SIZE 56
+static int pthread_attr_init_bionic(pthread_attr_t *attr)
+{
+  pthread_attr_t tmp;
+  int ret = pthread_attr_init(&tmp);
+  if (ret == 0)
+    memcpy(attr, &tmp, BIONIC_PTHREAD_ATTR_SIZE);
+  return ret;
 }
 
 // GL stuff
@@ -2164,7 +2206,7 @@ DynLibFunction dynlib_functions[] = {
 
     {"__android_log_print", (uintptr_t)__android_log_print},
 
-    {"__errno", (uintptr_t)&__errno},
+    {"__errno", (uintptr_t)&__errno_location},
 
     {"__stack_chk_fail", (uintptr_t)__stack_chk_fail_nop},
     // freezes with real __stack_chk_guard
@@ -2394,7 +2436,7 @@ DynLibFunction dynlib_functions[] = {
 
     // this only uses setjmp in the JPEG loader but not longjmp
     // probably doesn't matter if they're compatible or not
-    {"setjmp", (uintptr_t)&setjmp},
+    {"setjmp", (uintptr_t)&_setjmp},
 
     {"memcmp", (uintptr_t)&memcmp_wrapper},
     {"wmemcmp", (uintptr_t)&wmemcmp},
@@ -2507,7 +2549,7 @@ DynLibFunction dynlib_functions[] = {
 
     // pthread extended
     {"pthread_setname_np", (uintptr_t)&ret0},
-    {"pthread_attr_init", (uintptr_t)&pthread_attr_init},
+    {"pthread_attr_init", (uintptr_t)&pthread_attr_init_bionic},
     {"pthread_attr_getstacksize", (uintptr_t)&pthread_attr_getstacksize},
     {"pthread_attr_getschedparam", (uintptr_t)&pthread_attr_getschedparam},
     {"pthread_attr_setschedparam", (uintptr_t)&pthread_attr_setschedparam},
@@ -2515,7 +2557,7 @@ DynLibFunction dynlib_functions[] = {
     {"pthread_rwlock_unlock", (uintptr_t)&pthread_rwlock_unlock},
     {"pthread_rwlock_rdlock", (uintptr_t)&pthread_rwlock_rdlock},
     {"pthread_rwlock_wrlock", (uintptr_t)&pthread_rwlock_wrlock},
-    {"sched_get_priority_max", (uintptr_t)&sched_get_priority_max},
+    {"sched_get_priority_max", (uintptr_t)&sched_get_priority_max_stub},
     {"__register_atfork", (uintptr_t)&ret0},
     {"__cxa_finalize", (uintptr_t)&ret0},
 
@@ -2535,6 +2577,8 @@ size_t dynlib_numfunctions = sizeof(dynlib_functions) / sizeof(*dynlib_functions
 
 void update_imports(void)
 {
+  bsd_ctype_init();
+
   // only use the hooks if the relevant config options are enabled to avoid possible overhead
   if (config.disable_mipmaps)
     so_find_import(dynlib_functions, dynlib_numfunctions, "glCompressedTexImage2D")->func = (uintptr_t)glCompressedTexImage2DHook;
