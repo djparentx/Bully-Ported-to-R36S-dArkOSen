@@ -378,7 +378,7 @@ int so_resolve(DynLibFunction *funcs, int num_funcs, int taint_missing_imports)
               cpplib_missed++;
               if (taint_missing_imports)
                 *ptr = rels[j].r_offset;
-              debugPrintf("UNRESOLVED: %s (type=%d)\n", name, type);
+              logPrintf("UNRESOLVED: %s (type=%d)\n", name, type);
             }
           }
 
@@ -392,7 +392,7 @@ int so_resolve(DynLibFunction *funcs, int num_funcs, int taint_missing_imports)
     }
   }
 
-  debugPrintf("so_resolve: cpplib resolved %d, missed %d\n", cpplib_resolved, cpplib_missed);
+  logPrintf("so_resolve: cpplib resolved %d, missed %d\n", cpplib_resolved, cpplib_missed);
   return 0;
 }
 

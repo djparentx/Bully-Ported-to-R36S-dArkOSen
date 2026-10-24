@@ -320,7 +320,7 @@ static void jni_gamepad_sample(int *connected_out, u64 *buttons_out, float axes_
   // Select + Start: exit at any time
   if ((buttons & HidNpadButton_Plus) && (buttons & HidNpadButton_Minus))
   {
-    debugPrintf("jni_gamepad: Select+Start -> exit\n");
+    logPrintf("jni_gamepad: Select+Start -> exit\n");
     port_exit(0);
   }
 

@@ -23,6 +23,7 @@
 #include "imports.h"
 #include "zip_fs.h"
 #include "setup.h"
+#include "cpplib_loader.h"
 
 static void check_data(void)
 {
@@ -52,31 +53,60 @@ static void chdir_to_exe_dir(void)
 }
 
 // Fatal signals: log where it happened (libBully.so offsets when inside the game), then die
+static int crash_in_code(uintptr_t addr)
+{
+  uintptr_t game = (uintptr_t)text_virtbase, cpp = 0;
+  size_t cpp_size = 0;
+
+  cpplib_get_range(&cpp, &cpp_size);
+  return (game && addr >= game && addr < game + text_size) ||
+         (cpp && addr >= cpp && addr < cpp + cpp_size);
+}
+
+static void crash_addr(const char *what, uintptr_t addr)
+{
+  uintptr_t game = (uintptr_t)text_virtbase, cpp = 0;
+  size_t cpp_size = 0;
+  char buf[160];
+  int n;
+
+  cpplib_get_range(&cpp, &cpp_size);
+  if (game && addr >= game && addr < game + text_size)
+    n = snprintf(buf, sizeof(buf), "[CRASH] %-5s libBully.so+0x%lx\n", what, (unsigned long)(addr - game));
+  else if (cpp && addr >= cpp && addr < cpp + cpp_size)
+    n = snprintf(buf, sizeof(buf), "[CRASH] %-5s libc++_shared.so+0x%lx\n", what, (unsigned long)(addr - cpp));
+  else
+    n = snprintf(buf, sizeof(buf), "[CRASH] %-5s 0x%lx\n", what, (unsigned long)addr);
+  write(STDERR_FILENO, buf, n);
+}
+
+// Fatal signals: where it happened, then return addresses found on the stack
+// that point into the game's code (innermost first), then die
 static void crash_handler(int sig, siginfo_t *si, void *ucv)
 {
   ucontext_t *uc = (ucontext_t *)ucv;
-  uintptr_t pc = (uintptr_t)uc->uc_mcontext.pc;
-  uintptr_t lr = (uintptr_t)uc->uc_mcontext.regs[30];
   uintptr_t sp = (uintptr_t)uc->uc_mcontext.sp;
-  uintptr_t base = (uintptr_t)text_virtbase;
-  char buf[256];
-  int n;
+  const uintptr_t *stack = (const uintptr_t *)sp;
+  char buf[160];
+  int n, found = 0;
 
   fflush(stdout);
 
-  n = snprintf(buf, sizeof(buf), "[CRASH] signal=%d fault_addr=0x%lx pc=0x%lx lr=0x%lx sp=0x%lx\n",
-               sig, (unsigned long)si->si_addr, (unsigned long)pc, (unsigned long)lr, (unsigned long)sp);
+  n = snprintf(buf, sizeof(buf), "[CRASH] signal=%d fault_addr=0x%lx sp=0x%lx\n",
+               sig, (unsigned long)si->si_addr, (unsigned long)sp);
   write(STDERR_FILENO, buf, n);
+  crash_addr("pc", (uintptr_t)uc->uc_mcontext.pc);
+  crash_addr("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
 
-  if (base && pc >= base && pc < base + text_size)
+  // 32 KB of stack; if this runs off the mapped stack the second fault is
+  // fatal (SA_RESETHAND), so it can't loop
+  for (int i = 0; i < 4096 && found < 16; i++)
   {
-    n = snprintf(buf, sizeof(buf), "[CRASH] pc: libBully.so+0x%lx\n", (unsigned long)(pc - base));
-    write(STDERR_FILENO, buf, n);
-  }
-  if (base && lr >= base && lr < base + text_size)
-  {
-    n = snprintf(buf, sizeof(buf), "[CRASH] lr: libBully.so+0x%lx\n", (unsigned long)(lr - base));
-    write(STDERR_FILENO, buf, n);
+    if (crash_in_code(stack[i]))
+    {
+      crash_addr("stack", stack[i]);
+      found++;
+    }
   }
 
   raise(sig); // SA_RESETHAND: the default action now runs

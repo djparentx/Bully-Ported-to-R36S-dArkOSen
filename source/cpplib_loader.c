@@ -764,3 +764,10 @@ int cpplib_resolve_symbol(const char *name, uintptr_t *out_addr)
   }
   return 0;
 }
+
+// the whole mapping, for the crash handler's address lookup
+void cpplib_get_range(uintptr_t *base, size_t *size)
+{
+  *base = (uintptr_t)cpplib_virtbase;
+  *size = cpplib_load_size;
+}

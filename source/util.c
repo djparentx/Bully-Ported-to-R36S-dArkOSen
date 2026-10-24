@@ -37,47 +37,47 @@ void debugPrintf_setCompatDelayMs(int ms)
   s_compat_delay_ms = ms;
 }
 
+// Verbose tracing: printed only with debug_log 1 in config.txt. The lock and
+// the stall-delay workaround apply either way, since the Switch build's
+// thread timing depended on them.
 int debugPrintf(const char *text, ...)
 {
-#ifdef DEBUG_LOG
   va_list list;
   const char *tag = "?";
+
   if (s_main_thread_set)
     tag = pthread_equal(pthread_self(), s_main_thread) ? "M" : "G";
 
   pthread_mutex_lock(&s_log_mutex);
 
-#if DEBUG_FILE_LOG
-  FILE *f = fopen(LOG_NAME, "a");
-  if (f)
+  if (config.debug_log)
   {
-    fprintf(f, "[%s] ", tag);
+    printf("[%s] ", tag);
     va_start(list, text);
-    vfprintf(f, text, list);
+    vprintf(text, list);
     va_end(list);
-    fclose(f);
   }
-#endif
 
-  printf("[%s] ", tag);
-  va_start(list, text);
-  vprintf(text, list);
-  va_end(list);
-
-#if !DEBUG_FILE_LOG
-  // DEBUG_FILE_LOG=1 keeps this mutex held much longer because every log line
-  // does synchronous file I/O. That extra serialization is currently masking a
-  // startup/gameplay race in the port, so emulate a small portion of that
-  // delay without actually writing debug.log.
   if (s_compat_delay_ms > 0)
   {
     struct timespec ts = {0, (long)s_compat_delay_ms * 1000000L};
     nanosleep(&ts, NULL);
   }
-#endif
 
   pthread_mutex_unlock(&s_log_mutex);
-#endif
+  return 0;
+}
+
+// Always printed: setup, display, exit and error messages
+int logPrintf(const char *text, ...)
+{
+  va_list list;
+
+  pthread_mutex_lock(&s_log_mutex);
+  va_start(list, text);
+  vprintf(text, list);
+  va_end(list);
+  pthread_mutex_unlock(&s_log_mutex);
   return 0;
 }
 

@@ -31,6 +31,7 @@ static void config_defaults(void)
   config.crouch_toggle = 0;
   config.swap_ab_buttons = 0;
   config.swap_xy_buttons = 0;
+  config.debug_log = 0;
 }
 
 static int clamp_int(int v, int lo, int hi)
@@ -54,6 +55,7 @@ static void config_clamp(void)
   config.crouch_toggle = clamp_int(config.crouch_toggle, 0, 1);
   config.swap_ab_buttons = clamp_int(config.swap_ab_buttons, 0, 1);
   config.swap_xy_buttons = clamp_int(config.swap_xy_buttons, 0, 1);
+  config.debug_log = clamp_int(config.debug_log, 0, 1);
 }
 
 static void parse_var(const char *name, const char *value)
@@ -76,6 +78,8 @@ static void parse_var(const char *name, const char *value)
     config.swap_ab_buttons = atoi(value);
   else if (!strcmp(name, "swap_xy_buttons"))
     config.swap_xy_buttons = atoi(value);
+  else if (!strcmp(name, "debug_log"))
+    config.debug_log = atoi(value);
   // unknown keys (old files) are ignored and dropped on the next rewrite
 }
 
@@ -208,10 +212,19 @@ int write_config(const char *file)
           "#   Swaps the actions of the left and top face buttons.\n"
           "#   Valid values: 0 = off, 1 = swapped\n"
           "#   Default: 0\n"
-          "swap_xy_buttons %d\n",
+          "swap_xy_buttons %d\n"
+          "\n"
+          "# debug_log\n"
+          "#   Writes detailed technical tracing (graphics calls, file access, thread\n"
+          "#   hand-offs) to bully.log. Only useful when tracking down a bug: the log\n"
+          "#   grows by thousands of lines per run.\n"
+          "#   With 0 the log only holds setup, display, exit and error messages.\n"
+          "#   Valid values: 0 = off, 1 = on\n"
+          "#   Default: 0\n"
+          "debug_log %d\n",
           config.render_scale, config.clarity, config.shadows, config.trilinear_filter,
           config.disable_mipmaps, config.language, config.crouch_toggle,
-          config.swap_ab_buttons, config.swap_xy_buttons);
+          config.swap_ab_buttons, config.swap_xy_buttons, config.debug_log);
 
   if (fclose(f) != 0 || rename(tmp, file) != 0)
   {

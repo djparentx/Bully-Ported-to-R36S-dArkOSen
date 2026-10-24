@@ -93,13 +93,13 @@ int video_open(void)
 
   if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
   {
-    debugPrintf("video: SDL video init failed: %s\n", SDL_GetError());
+    logPrintf("video: SDL video init failed: %s\n", SDL_GetError());
     return 0;
   }
 
   if (SDL_GetDesktopDisplayMode(0, &mode) != 0)
   {
-    debugPrintf("video: no display mode: %s\n", SDL_GetError());
+    logPrintf("video: no display mode: %s\n", SDL_GetError());
     return 0;
   }
   s_panel_w = mode.w;
@@ -120,7 +120,7 @@ int video_open(void)
                               s_panel_w, s_panel_h, SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
   if (!s_window)
   {
-    debugPrintf("video: window creation failed: %s\n", SDL_GetError());
+    logPrintf("video: window creation failed: %s\n", SDL_GetError());
     return 0;
   }
 
@@ -128,7 +128,7 @@ int video_open(void)
   s_glctx = SDL_GL_CreateContext(s_window);
   if (!s_glctx)
   {
-    debugPrintf("video: GL context creation failed: %s\n", SDL_GetError());
+    logPrintf("video: GL context creation failed: %s\n", SDL_GetError());
     SDL_DestroyWindow(s_window);
     s_window = NULL;
     return 0;
@@ -141,11 +141,11 @@ int video_open(void)
   g_egl_context = eglGetCurrentContext();
 
   if (SDL_GL_SetSwapInterval(1) != 0)
-    debugPrintf("video: could not set swap interval: %s\n", SDL_GetError());
+    logPrintf("video: could not set swap interval: %s\n", SDL_GetError());
 
-  debugPrintf("video: panel %dx%d\n", s_panel_w, s_panel_h);
-  debugPrintf("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
-  debugPrintf("GL_VERSION: %s\n", glGetString(GL_VERSION));
+  logPrintf("video: panel %dx%d\n", s_panel_w, s_panel_h);
+  logPrintf("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
+  logPrintf("GL_VERSION: %s\n", glGetString(GL_VERSION));
   return 1;
 }
 
@@ -173,7 +173,7 @@ int NVEventEGLInit(void)
     }
   }
 
-  debugPrintf("video: game renders %dx%d (scale %.2f, fbo %u)\n",
+  logPrintf("video: game renders %dx%d (scale %.2f, fbo %u)\n",
               screen_width, screen_height, scale, s_fbo);
   debugPrintf("GL_EXTENSIONS: %s\n", glGetString(GL_EXTENSIONS));
 
@@ -181,7 +181,7 @@ int NVEventEGLInit(void)
   return 1; // success
 }
 
-// --- one textured quad, for the installer UI and the splash ---------------
+// --- textured quads, for the installer UI and the loading screen ----------
 
 static GLuint s_blit_prog = 0;
 
@@ -197,7 +197,7 @@ static GLuint blit_compile(GLenum type, const char *src)
   {
     char log[256];
     glGetShaderInfoLog(sh, sizeof(log), NULL, log);
-    debugPrintf("video: blit shader: %s\n", log);
+    logPrintf("video: blit shader: %s\n", log);
     glDeleteShader(sh);
     return 0;
   }
@@ -240,7 +240,7 @@ static int blit_init(void)
   glGetProgramiv(s_blit_prog, GL_LINK_STATUS, &ok);
   if (!ok)
   {
-    debugPrintf("video: blit program link failed\n");
+    logPrintf("video: blit program link failed\n");
     glDeleteProgram(s_blit_prog);
     s_blit_prog = 0;
     return 0;
@@ -252,53 +252,84 @@ static int blit_init(void)
   return 1;
 }
 
-// Draw an RGBA image over the whole window: scaled to fill, the overflow
-// trimmed evenly from both sides (centered crop). Caller presents.
-void video_draw_rgba(const void *rgba, int w, int h, int nearest)
+unsigned int video_tex_create(const void *rgba, int w, int h)
 {
   GLuint tex;
-  GLint filter = nearest ? GL_NEAREST : GL_LINEAR;
-  float sx, sy, s, us, vs, u0, u1, v0, v1;
-
-  if (!s_window || w <= 0 || h <= 0)
-    return;
-  if (!s_blit_prog && !blit_init())
-    return;
-
-  sx = (float)s_panel_w / (float)w;
-  sy = (float)s_panel_h / (float)h;
-  s = sx > sy ? sx : sy;                    // fill the screen
-  us = (float)s_panel_w / ((float)w * s);   // visible fraction of the image width
-  vs = (float)s_panel_h / ((float)h * s);   // visible fraction of the image height
-  u0 = (1.0f - us) * 0.5f;
-  u1 = u0 + us;
-  v0 = (1.0f - vs) * 0.5f;
-  v1 = v0 + vs;
-
-  // x, y, u, v -- image row 0 is the top
-  const GLfloat verts[] = {
-      -1.0f, -1.0f, u0, v1,
-      1.0f, -1.0f, u1, v1,
-      -1.0f, 1.0f, u0, v0,
-      1.0f, 1.0f, u1, v0,
-  };
 
   glGenTextures(1, &tex);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, tex);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  return tex;
+}
 
+void video_tex_update(unsigned int tex, const void *rgba, int w, int h)
+{
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void video_tex_free(unsigned int tex)
+{
+  GLuint t = tex;
+  glDeleteTextures(1, &t);
+}
+
+void video_clear(void)
+{
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
   glViewport(0, 0, s_panel_w, s_panel_h);
-  glDisable(GL_BLEND);
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_SCISSOR_TEST);
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+}
 
+// Draw a texture into a panel-pixel rectangle (top-left origin) with the
+// given texture coordinates; blend = straight-alpha blending over what's there
+void video_draw_tex(unsigned int tex, float x, float y, float w, float h,
+                    float u0, float v0, float u1, float v1, int blend)
+{
+  float x0, x1, y0, y1;
+
+  if (!s_window || !tex)
+    return;
+  if (!s_blit_prog && !blit_init())
+    return;
+
+  x0 = x / (float)s_panel_w * 2.0f - 1.0f;
+  x1 = (x + w) / (float)s_panel_w * 2.0f - 1.0f;
+  y0 = 1.0f - y / (float)s_panel_h * 2.0f;
+  y1 = 1.0f - (y + h) / (float)s_panel_h * 2.0f;
+
+  const GLfloat verts[] = {
+      x0, y1, u0, v1,
+      x1, y1, u1, v1,
+      x0, y0, u0, v0,
+      x1, y0, u1, v0,
+  };
+
+  if (blend)
+  {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  }
+  else
+  {
+    glDisable(GL_BLEND);
+  }
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, tex);
   glUseProgram(s_blit_prog);
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts);
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts + 2);
@@ -308,9 +339,8 @@ void video_draw_rgba(const void *rgba, int w, int h, int nearest)
   glDisableVertexAttribArray(0);
   glDisableVertexAttribArray(1);
   glUseProgram(0);
-
   glBindTexture(GL_TEXTURE_2D, 0);
-  glDeleteTextures(1, &tex);
+  glDisable(GL_BLEND);
 }
 
 void video_present(void)

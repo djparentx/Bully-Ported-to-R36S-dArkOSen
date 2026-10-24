@@ -12,6 +12,7 @@
 #define __CPPLIB_LOADER_H__
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,7 @@ extern "C" {
 int cpplib_load(const char *filename);
 uintptr_t cpplib_find_symbol(const char *name);
 int cpplib_resolve_symbol(const char *name, uintptr_t *out_addr);
+void cpplib_get_range(uintptr_t *base, size_t *size);
 
 #ifdef __cplusplus
 }

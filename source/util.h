@@ -13,6 +13,7 @@
 #include <time.h>
 
 int debugPrintf(const char *text, ...);
+int logPrintf(const char *text, ...);
 void debugPrintf_setMainThread(void);
 void debugPrintf_setCompatDelayMs(int ms);
 

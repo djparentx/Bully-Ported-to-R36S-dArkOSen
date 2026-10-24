@@ -1572,7 +1572,7 @@ void port_exit(int code) {
     for (;;)
       pause(); // another thread is already exiting
 
-  debugPrintf("port_exit: code=%d\n", code);
+  logPrintf("port_exit: code=%d\n", code);
   fflush(stdout);
   fflush(stderr);
   _exit(code);

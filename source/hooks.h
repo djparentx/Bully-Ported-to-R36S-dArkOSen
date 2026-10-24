@@ -59,9 +59,14 @@ EGLBoolean eglSwapInterval_wrapper(EGLDisplay dpy, EGLint interval);
 void glBindFramebuffer_wrapper(GLenum target, GLuint framebuffer);
 
 int video_open(void);
-void video_draw_rgba(const void *rgba, int w, int h, int nearest);
-void video_present(void);
 void video_panel_size(int *w, int *h);
+void video_clear(void);
+unsigned int video_tex_create(const void *rgba, int w, int h);
+void video_tex_update(unsigned int tex, const void *rgba, int w, int h);
+void video_tex_free(unsigned int tex);
+void video_draw_tex(unsigned int tex, float x, float y, float w, float h,
+                    float u0, float v0, float u1, float v1, int blend);
+void video_present(void);
 
 // Clean process exit (hooks/game.c)
 void port_exit(int code) __attribute__((noreturn));
