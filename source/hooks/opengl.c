@@ -34,13 +34,7 @@ static GLuint s_fbo = 0, s_fbo_color = 0, s_fbo_depth = 0;
 
 static float video_render_scale(void)
 {
-  const char *s = getenv("BULLY_RENDER_SCALE");
-  float scale = s ? (float)atof(s) : 1.0f;
-  if (scale < 0.5f)
-    scale = 0.5f;
-  if (scale > 1.0f)
-    scale = 1.0f;
-  return scale;
+  return config.render_scale; // clamped to 0.50-1.00 by read_config()
 }
 
 static int video_create_fbo(void)
@@ -88,7 +82,9 @@ void NVEventEGLUnmakeCurrent(void)
 {
 }
 
-int NVEventEGLInit(void)
+// Window + GLES context, current on the calling (main) thread.
+// Opened once at startup and shared by the installer, the splash and the game.
+int video_open(void)
 {
   SDL_DisplayMode mode;
 
@@ -147,6 +143,22 @@ int NVEventEGLInit(void)
   if (SDL_GL_SetSwapInterval(1) != 0)
     debugPrintf("video: could not set swap interval: %s\n", SDL_GetError());
 
+  debugPrintf("video: panel %dx%d\n", s_panel_w, s_panel_h);
+  debugPrintf("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
+  debugPrintf("GL_VERSION: %s\n", glGetString(GL_VERSION));
+  return 1;
+}
+
+// Game path (jni_start / InitEGLAndGLES2): reuse the window, set the render size, optional FBO
+int NVEventEGLInit(void)
+{
+  static int s_game_ready = 0;
+
+  if (s_game_ready)
+    return 1;
+  if (!video_open())
+    return 0;
+
   float scale = video_render_scale();
   screen_width = s_panel_w;
   screen_height = s_panel_h;
@@ -161,13 +173,155 @@ int NVEventEGLInit(void)
     }
   }
 
-  debugPrintf("video: panel %dx%d, game renders %dx%d (scale %.2f, fbo %u)\n",
-              s_panel_w, s_panel_h, screen_width, screen_height, scale, s_fbo);
-  debugPrintf("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
-  debugPrintf("GL_VERSION: %s\n", glGetString(GL_VERSION));
+  debugPrintf("video: game renders %dx%d (scale %.2f, fbo %u)\n",
+              screen_width, screen_height, scale, s_fbo);
   debugPrintf("GL_EXTENSIONS: %s\n", glGetString(GL_EXTENSIONS));
 
+  s_game_ready = 1;
   return 1; // success
+}
+
+// --- one textured quad, for the installer UI and the splash ---------------
+
+static GLuint s_blit_prog = 0;
+
+static GLuint blit_compile(GLenum type, const char *src)
+{
+  GLuint sh = glCreateShader(type);
+  GLint ok = 0;
+
+  glShaderSource(sh, 1, &src, NULL);
+  glCompileShader(sh);
+  glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+  if (!ok)
+  {
+    char log[256];
+    glGetShaderInfoLog(sh, sizeof(log), NULL, log);
+    debugPrintf("video: blit shader: %s\n", log);
+    glDeleteShader(sh);
+    return 0;
+  }
+  return sh;
+}
+
+static int blit_init(void)
+{
+  static const char *vs =
+      "attribute vec2 a_pos;\n"
+      "attribute vec2 a_uv;\n"
+      "varying vec2 v_uv;\n"
+      "void main() { gl_Position = vec4(a_pos, 0.0, 1.0); v_uv = a_uv; }\n";
+  static const char *fs =
+      "precision mediump float;\n"
+      "varying vec2 v_uv;\n"
+      "uniform sampler2D u_tex;\n"
+      "void main() { gl_FragColor = texture2D(u_tex, v_uv); }\n";
+  GLuint v = blit_compile(GL_VERTEX_SHADER, vs);
+  GLuint f = blit_compile(GL_FRAGMENT_SHADER, fs);
+  GLint ok = 0;
+
+  if (!v || !f)
+  {
+    if (v)
+      glDeleteShader(v);
+    if (f)
+      glDeleteShader(f);
+    return 0;
+  }
+
+  s_blit_prog = glCreateProgram();
+  glAttachShader(s_blit_prog, v);
+  glAttachShader(s_blit_prog, f);
+  glBindAttribLocation(s_blit_prog, 0, "a_pos");
+  glBindAttribLocation(s_blit_prog, 1, "a_uv");
+  glLinkProgram(s_blit_prog);
+  glDeleteShader(v);
+  glDeleteShader(f);
+  glGetProgramiv(s_blit_prog, GL_LINK_STATUS, &ok);
+  if (!ok)
+  {
+    debugPrintf("video: blit program link failed\n");
+    glDeleteProgram(s_blit_prog);
+    s_blit_prog = 0;
+    return 0;
+  }
+
+  glUseProgram(s_blit_prog);
+  glUniform1i(glGetUniformLocation(s_blit_prog, "u_tex"), 0);
+  glUseProgram(0);
+  return 1;
+}
+
+// Draw an RGBA image over the whole window: scaled to fill, the overflow
+// trimmed evenly from both sides (centered crop). Caller presents.
+void video_draw_rgba(const void *rgba, int w, int h, int nearest)
+{
+  GLuint tex;
+  GLint filter = nearest ? GL_NEAREST : GL_LINEAR;
+  float sx, sy, s, us, vs, u0, u1, v0, v1;
+
+  if (!s_window || w <= 0 || h <= 0)
+    return;
+  if (!s_blit_prog && !blit_init())
+    return;
+
+  sx = (float)s_panel_w / (float)w;
+  sy = (float)s_panel_h / (float)h;
+  s = sx > sy ? sx : sy;                    // fill the screen
+  us = (float)s_panel_w / ((float)w * s);   // visible fraction of the image width
+  vs = (float)s_panel_h / ((float)h * s);   // visible fraction of the image height
+  u0 = (1.0f - us) * 0.5f;
+  u1 = u0 + us;
+  v0 = (1.0f - vs) * 0.5f;
+  v1 = v0 + vs;
+
+  // x, y, u, v -- image row 0 is the top
+  const GLfloat verts[] = {
+      -1.0f, -1.0f, u0, v1,
+      1.0f, -1.0f, u1, v1,
+      -1.0f, 1.0f, u0, v0,
+      1.0f, 1.0f, u1, v0,
+  };
+
+  glGenTextures(1, &tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glViewport(0, 0, s_panel_w, s_panel_h);
+  glDisable(GL_BLEND);
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_SCISSOR_TEST);
+
+  glUseProgram(s_blit_prog);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts);
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts + 2);
+  glEnableVertexAttribArray(0);
+  glEnableVertexAttribArray(1);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glDisableVertexAttribArray(0);
+  glDisableVertexAttribArray(1);
+  glUseProgram(0);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glDeleteTextures(1, &tex);
+}
+
+void video_present(void)
+{
+  SDL_GL_SwapWindow(s_window);
+}
+
+void video_panel_size(int *w, int *h)
+{
+  *w = s_panel_w;
+  *h = s_panel_h;
 }
 
 // Called on the thread that owns the context (render thread)

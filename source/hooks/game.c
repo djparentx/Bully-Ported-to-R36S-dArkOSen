@@ -178,6 +178,9 @@ static void BullySettings_ApplyConfig(void *this_ptr)
   settings->shadow_profile = shadow_profile;
   settings->effects_level = clarity + 1;
   settings->shadow_setting = shadows;
+  // 0 English, 1 Spanish, 2 French, 3 German, 4 Italian, 5 Japanese, 6 Russian
+  // (BullySettings::SystemLanguageToSettingsLanguage numbering)
+  settings->language_setting = config.language;
 }
 
 static void BullySettings_ResetDisplay_hook(void *this_ptr)

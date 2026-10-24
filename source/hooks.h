@@ -58,6 +58,11 @@ void video_release_current(void);
 EGLBoolean eglSwapInterval_wrapper(EGLDisplay dpy, EGLint interval);
 void glBindFramebuffer_wrapper(GLenum target, GLuint framebuffer);
 
+int video_open(void);
+void video_draw_rgba(const void *rgba, int w, int h, int nearest);
+void video_present(void);
+void video_panel_size(int *w, int *h);
+
 // Clean process exit (hooks/game.c)
 void port_exit(int code) __attribute__((noreturn));
 

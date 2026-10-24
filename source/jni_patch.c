@@ -206,6 +206,48 @@ static int jni_gamepad_update(void)
   return g_sdl_gamepad != NULL;
 }
 
+static u64 swap_bits(u64 v, u64 a, u64 b)
+{
+  u64 has_a = v & a, has_b = v & b;
+
+  v &= ~(a | b);
+  if (has_a)
+    v |= b;
+  if (has_b)
+    v |= a;
+  return v;
+}
+
+// config.txt options applied to the physical buttons: face-button swaps and
+// crouch toggle (R3 latches; several threads sample the pad, hence the lock)
+static u64 jni_gamepad_apply_options(u64 buttons)
+{
+  static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+  static int r3_prev = 0, crouch_latched = 0;
+
+  if (config.swap_ab_buttons) // bottom <-> right
+    buttons = swap_bits(buttons, HidNpadButton_A, HidNpadButton_B);
+  if (config.swap_xy_buttons) // left <-> top
+    buttons = swap_bits(buttons, HidNpadButton_X, HidNpadButton_Y);
+
+  if (config.crouch_toggle)
+  {
+    int r3 = (buttons & HidNpadButton_StickR) != 0;
+
+    pthread_mutex_lock(&lock);
+    if (r3 && !r3_prev)
+      crouch_latched = !crouch_latched;
+    r3_prev = r3;
+    if (crouch_latched)
+      buttons |= HidNpadButton_StickR;
+    else
+      buttons &= ~HidNpadButton_StickR;
+    pthread_mutex_unlock(&lock);
+  }
+
+  return buttons;
+}
+
 static void jni_gamepad_sample(int *connected_out, u64 *buttons_out, float axes_out[6])
 {
   const float scale = 1.0f / 32767.0f;
@@ -282,6 +324,8 @@ static void jni_gamepad_sample(int *connected_out, u64 *buttons_out, float axes_
     port_exit(0);
   }
 
+  buttons = jni_gamepad_apply_options(buttons);
+  
   if (buttons_out)
     *buttons_out = buttons;
 
@@ -1327,8 +1371,9 @@ void jni_start(void)
   int rockstar_gate_fired = 0;
   int forced_gamestate = 0;
   int audio_runtime_enabled = 0;
-  int compat_auto = (config.timing_workaround_ms <= 0);
-  int compat_delay_ms = compat_auto ? 0 : config.timing_workaround_ms;
+  // automatic stall workaround (the old timing_workaround_ms 0 = auto)
+  int compat_auto = 1;
+  int compat_delay_ms = 0;
   int compat_max_delay_ms = 4;
   int last_swap_count = 0;
   uint64_t last_swap_progress_ns = 0;

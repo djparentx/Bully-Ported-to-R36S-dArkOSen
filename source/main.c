@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <limits.h>
+#include <stdio.h>
+#include <signal.h>
+#include <ucontext.h>
 
 #include "config.h"
 #include "util.h"
@@ -19,29 +22,15 @@
 #include "hooks.h"
 #include "imports.h"
 #include "zip_fs.h"
+#include "setup.h"
 
 static void check_data(void)
 {
-  const char *files[] = {
-      // Basic structural check for loose files (assets folder)
-      "assets/data_0.zip",
-      // mod file goes here
-      "",
-  };
   struct stat st;
-  unsigned int numfiles = (sizeof(files) / sizeof(*files)) - 1;
-  // if mod is enabled, also check for mod file
-  if (config.mod_file[0])
-    files[numfiles++] = config.mod_file;
-  // check if all the required files are present
-  for (unsigned int i = 0; i < numfiles; ++i)
-  {
-    if (stat(files[i], &st) < 0)
-    {
-      fatal_error("Could not find\n%s.\nCheck your data files.", files[i]);
-      break;
-    }
-  }
+
+  // the installer puts this in place; missing means a damaged install
+  if (stat("assets/data_0.zip", &st) < 0)
+    fatal_error("Could not find\n%s.\nCheck your data files.", "assets/data_0.zip");
 }
 
 // run from the binary's own folder so relative paths (assets/, savegames/, config.txt) resolve
@@ -62,19 +51,73 @@ static void chdir_to_exe_dir(void)
     fatal_error("Could not enter game folder\n%s", path);
 }
 
+// Fatal signals: log where it happened (libBully.so offsets when inside the game), then die
+static void crash_handler(int sig, siginfo_t *si, void *ucv)
+{
+  ucontext_t *uc = (ucontext_t *)ucv;
+  uintptr_t pc = (uintptr_t)uc->uc_mcontext.pc;
+  uintptr_t lr = (uintptr_t)uc->uc_mcontext.regs[30];
+  uintptr_t sp = (uintptr_t)uc->uc_mcontext.sp;
+  uintptr_t base = (uintptr_t)text_virtbase;
+  char buf[256];
+  int n;
+
+  fflush(stdout);
+
+  n = snprintf(buf, sizeof(buf), "[CRASH] signal=%d fault_addr=0x%lx pc=0x%lx lr=0x%lx sp=0x%lx\n",
+               sig, (unsigned long)si->si_addr, (unsigned long)pc, (unsigned long)lr, (unsigned long)sp);
+  write(STDERR_FILENO, buf, n);
+
+  if (base && pc >= base && pc < base + text_size)
+  {
+    n = snprintf(buf, sizeof(buf), "[CRASH] pc: libBully.so+0x%lx\n", (unsigned long)(pc - base));
+    write(STDERR_FILENO, buf, n);
+  }
+  if (base && lr >= base && lr < base + text_size)
+  {
+    n = snprintf(buf, sizeof(buf), "[CRASH] lr: libBully.so+0x%lx\n", (unsigned long)(lr - base));
+    write(STDERR_FILENO, buf, n);
+  }
+
+  raise(sig); // SA_RESETHAND: the default action now runs
+}
+
+static void install_crash_handler(void)
+{
+  static const int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
+  struct sigaction sa;
+
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = crash_handler;
+  sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+  sigemptyset(&sa.sa_mask);
+  for (unsigned i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++)
+    sigaction(sigs[i], &sa, NULL);
+}
+
 int main(void)
 {
-  int compat_delay_ms = 0;
-
   chdir_to_exe_dir();
-  // try to read the config file and create one with default values if it's missing
-  if (read_config(CONFIG_NAME) < 0)
-    write_config(CONFIG_NAME);
 
-  compat_delay_ms = config.timing_workaround_ms;
-  if (compat_delay_ms < 0)
-    compat_delay_ms = 0;
-  debugPrintf_setCompatDelayMs(compat_delay_ms);
+  // line-buffered so the log is complete up to a crash
+  setvbuf(stdout, NULL, _IOLBF, 0);
+  install_crash_handler();
+
+  // the user's values (defaults for anything missing, clamped), then
+  // config.txt is rewritten from the commented template with those values
+  read_config(CONFIG_NAME);
+  write_config(CONFIG_NAME);
+
+  debugPrintf_setCompatDelayMs(0);
+
+  // one window for the installer, the splash and the game
+  if (!video_open())
+    fatal_error("Could not open the display");
+
+  if (!setup_is_installed() && !setup_run())
+    port_exit(0);
+
+  splash_show();
 
   zip_fs_init();
 
@@ -84,8 +127,8 @@ int main(void)
   extern int cpplib_load(const char *filename);
   if (cpplib_load("libc++_shared.so") < 0)
     fatal_error("Could not load libc++_shared.so.\nCopy it from the APK\nlib/arm64-v8a/ folder\nto the game directory.");
-
   if (so_load(SO_NAME) < 0)
+    fatal_error("Could not load\n%s.", SO_NAME);
 
   // won't save without it
   mkdir("savegames", 0777);

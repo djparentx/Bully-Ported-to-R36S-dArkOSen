@@ -27,12 +27,15 @@ extern int screen_width;
 extern int screen_height;
 
 typedef struct {
+  float render_scale;
   int clarity;
   int shadows;
   int trilinear_filter;
   int disable_mipmaps;
-  int timing_workaround_ms;
-  char mod_file[0x100];
+  int language;
+  int crouch_toggle;
+  int swap_ab_buttons;
+  int swap_xy_buttons;
 } Config;
 
 extern Config config;
