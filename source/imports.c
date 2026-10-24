@@ -26,6 +26,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <GLES3/gl3.h>
@@ -2019,11 +2020,86 @@ void glTexParameteriHook(GLenum target, GLenum param, GLint val)
   glTexParameteri(target, param, val);
 }
 
+// --- save files --------------------------------------------------------------
+// The game writes its saves to its storage root ("."): BullyFile<N>,
+// FileInfo<N>, settings.ini and storage.ini (and any temp names starting with
+// BullyFile/FileInfo). Those are redirected into savegames/.
+#define SAVE_DIR "savegames"
+
+static int is_save_name(const char *name)
+{
+  return !strncmp(name, "BullyFile", 9) || !strncmp(name, "FileInfo", 8) ||
+         !strcmp(name, "settings.ini") || !strcmp(name, "storage.ini");
+}
+
+// the savegames/ path for a save file in the game folder; any other path is
+// returned unchanged
+const char *save_path(const char *path, char *out, size_t size)
+{
+  const char *name = path;
+
+  if (!path)
+    return path;
+  while (name[0] == '.' && name[1] == '/')
+    name += 2;
+  if (strchr(name, '/') || !is_save_name(name))
+    return path;
+  snprintf(out, size, SAVE_DIR "/%s", name);
+  return out;
+}
+
+// once at start: create savegames/ and move saves left in the game folder into it
+void save_migrate(void)
+{
+  struct dirent *e;
+  char dst[512];
+  DIR *dir;
+
+  mkdir(SAVE_DIR, 0777);
+  dir = opendir(".");
+  if (!dir)
+    return;
+  while ((e = readdir(dir)) != NULL)
+  {
+    struct stat st;
+
+    if (!is_save_name(e->d_name) || stat(e->d_name, &st) != 0 || !S_ISREG(st.st_mode))
+      continue;
+    snprintf(dst, sizeof(dst), SAVE_DIR "/%s", e->d_name);
+    if (access(dst, F_OK) == 0)
+      logPrintf("saves: %s left in place, %s already exists\n", e->d_name, dst);
+    else if (rename(e->d_name, dst) == 0)
+      logPrintf("saves: moved %s to %s\n", e->d_name, dst);
+    else
+      logPrintf("saves: could not move %s: %s\n", e->d_name, strerror(errno));
+  }
+  closedir(dir);
+}
+
+int stat_wrapper(const char *path, struct stat *st)
+{
+  char spath[512];
+  return stat(save_path(path, spath, sizeof(spath)), st);
+}
+
+int unlink_wrapper(const char *path)
+{
+  char spath[512];
+  return unlink(save_path(path, spath, sizeof(spath)));
+}
+
+int rename_wrapper(const char *from, const char *to)
+{
+  char sfrom[512], sto[512];
+  return rename(save_path(from, sfrom, sizeof(sfrom)), save_path(to, sto, sizeof(sto)));
+}
+
 // fopen wrapper to trace all file opens from the game
 static int fopen_count = 0;
 FILE *fopen_wrapper(const char *path, const char *mode)
 {
-  FILE *f = fopen(path, mode);
+  char spath[512];
+  FILE *f = fopen(save_path(path, spath, sizeof(spath)), mode);
   if (!f && path && mode && mode[0] == 'r')
     f = zip_fs_fopen(path);
   fopen_count++;
@@ -2035,6 +2111,7 @@ static int open_count = 0;
 int open_wrapper(const char *path, int flags, ...)
 {
   mode_t mode = 0;
+  char spath[512];
   int fd;
 
   if (flags & O_CREAT)
@@ -2043,11 +2120,11 @@ int open_wrapper(const char *path, int flags, ...)
     va_start(ap, flags);
     mode = (mode_t)va_arg(ap, int);
     va_end(ap);
-    fd = open(path, flags, mode);
+    fd = open(save_path(path, spath, sizeof(spath)), flags, mode);
   }
   else
   {
-    fd = open(path, flags);
+    fd = open(save_path(path, spath, sizeof(spath)), flags);
   }
 
   if (fd < 0 && !(flags & (O_WRONLY | O_RDWR)))
@@ -2467,7 +2544,7 @@ DynLibFunction dynlib_functions[] = {
     {"mkdir", (uintptr_t)&mkdir},
     {"open", (uintptr_t)&open_wrapper},
     {"read", (uintptr_t)&read},
-    {"stat", (uintptr_t)stat},
+    {"stat", (uintptr_t)&stat_wrapper},
     {"write", (uintptr_t)&write},
 
     {"strcasecmp", (uintptr_t)&strcasecmp},
@@ -2532,8 +2609,8 @@ DynLibFunction dynlib_functions[] = {
     {"getc", (uintptr_t)&getc},
     {"putchar", (uintptr_t)&putchar},
     {"puts", (uintptr_t)&puts},
-    {"unlink", (uintptr_t)&unlink},
-    {"rename", (uintptr_t)&rename},
+    {"unlink", (uintptr_t)&unlink_wrapper},
+    {"rename", (uintptr_t)&rename_wrapper},
     {"longjmp", (uintptr_t)&longjmp},
     {"stdin", (uintptr_t)&stdin_fake},
     {"getpid", (uintptr_t)&getpid},

@@ -22,7 +22,7 @@
 #include "config.h"
 #include "so_util.h"
 #include "hooks.h"
-#include "util.h"
+#include "imports.h"
 
 enum MethodIDs
 {
@@ -556,7 +556,8 @@ int DeleteFile(char *file)
 {
   char path[128];
   snprintf(path, sizeof(path), "%s/%s", ".", file);
-  if (unlink(path) < 0)
+  char spath[512];
+  if (unlink(save_path(path, spath, sizeof(spath))) < 0)
     return 0;
   return 1;
 }

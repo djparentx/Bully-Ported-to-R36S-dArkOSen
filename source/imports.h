@@ -18,5 +18,7 @@ extern DynLibFunction dynlib_functions[];
 extern size_t dynlib_numfunctions;
 
 void update_imports(void);
+const char *save_path(const char *path, char *out, size_t size);
+void save_migrate(void);
 
 #endif

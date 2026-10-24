@@ -158,8 +158,8 @@ int main(void)
   if (so_load(SO_NAME) < 0)
     fatal_error("Could not load\n%s.", SO_NAME);
 
-  // won't save without it
-  mkdir("savegames", 0777);
+  // saves live in savegames/ (created here); older saves in the game folder move into it
+  save_migrate();
 
   update_imports();
 
