@@ -22,6 +22,7 @@
 #include "config.h"
 #include "so_util.h"
 #include "hooks.h"
+#include "util.h"
 #include "imports.h"
 
 enum MethodIDs
