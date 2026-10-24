@@ -357,8 +357,8 @@ void video_panel_size(int *w, int *h)
   *h = s_panel_h;
 }
 // --- loading screen --------------------------------------------------------
-// The game presents blank frames for a long time while it loads. Until it
-// presents its first frame that draws anything, those frames show the
+// The game draws once during renderer start-up, then loads for a long time.
+// Until it draws in 3 frames in a row, every frame it presents shows the
 // loading screen (setup.c) instead.
 
 static void (*s_loading_draw)(void) = NULL;
@@ -478,35 +478,34 @@ static void video_loading_frame(void)
 void video_swap(void)
 {
   GLint draw_fb = 0, read_fb = 0;
-  static int s_drawn_frames = 0, s_load_logged = 0;
+  static int s_drawn_frames = 0, s_load_done = 0;
 
-  // load time: the game's first 3 frames in a row that draw anything (its
-  // renderer start-up test draws once, then it compiles shaders without drawing)
-  if (!s_load_logged)
+  // load time and loading screen: the game's first 3 frames in a row that
+  // draw anything end both (its renderer start-up test draws in one frame,
+  // then it compiles shaders for a long time without drawing)
+  if (!s_load_done)
   {
     s_drawn_frames = s_frame_draws ? s_drawn_frames + 1 : 0;
-    if (s_drawn_frames == 3)
+    s_frame_draws = 0;
+    if (s_drawn_frames < 3)
     {
-      logPrintf("video: game loaded in %.1f s (from its EGL start)\n",
+      if (s_loading_draw)
+      {
+        video_loading_frame();
+        SDL_GL_SwapWindow(s_window);
+        return;
+      }
+    }
+    else
+    {
+      logPrintf("video: game loaded in %.1f s (from its EGL start), loading screen off\n",
                 (double)(mono_ns() - s_game_start_ns) / 1e9);
-      s_load_logged = 1;
+      if (s_loading_release)
+        s_loading_release();
+      s_loading_draw = NULL;
+      s_loading_release = NULL;
+      s_load_done = 1;
     }
-  }
-
-  // loading screen on the game's blank frames, until its first real frame
-  if (s_loading_draw)
-  {
-    if (!s_frame_draws)
-    {
-      video_loading_frame();
-      SDL_GL_SwapWindow(s_window);
-      return;
-    }
-    logPrintf("video: game is drawing, loading screen off\n");
-    if (s_loading_release)
-      s_loading_release();
-    s_loading_draw = NULL;
-    s_loading_release = NULL;
   }
 
   if (s_fbo)
