@@ -58,6 +58,9 @@ void video_release_current(void);
 EGLBoolean eglSwapInterval_wrapper(EGLDisplay dpy, EGLint interval);
 void glBindFramebuffer_wrapper(GLenum target, GLuint framebuffer);
 
+// Clean process exit (hooks/game.c)
+void port_exit(int code) __attribute__((noreturn));
+
 // EGL globals (initialized by NVEventEGLInit)
 extern EGLDisplay g_egl_display;
 extern EGLSurface g_egl_surface;

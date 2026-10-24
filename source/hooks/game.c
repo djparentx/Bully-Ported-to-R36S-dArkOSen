@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <switch.h>
+#include <unistd.h>
 #include <threads.h>
 
 #include <EGL/egl.h>
@@ -1085,11 +1085,11 @@ static void IOBuffer_BlockUntilComplete_hook(void *this_ptr)
     if (jni_async_file_pending())
     {
       jni_async_file_kick();
-      svcSleepThread(100000LL);
+      sleep_ns(100000ULL);
       continue;
     }
 
-    svcSleepThread(1000000LL);
+    sleep_ns(1000000ULL);
   }
 }
 
@@ -1558,17 +1558,25 @@ char *OS_FileGetArchiveName(int mode) {
   return out;
 }
 
+// Clean exit: Select+Start, the game's own Quit, or ExitAndroidGame.
+// _exit() skips the game's __cxa_atexit destructors (they would run against
+// live engine threads); the kernel releases DRM, ALSA and memory, and the
+// launcher restores the console.
+void port_exit(int code) {
+  static volatile int exiting = 0;
+
+  if (__atomic_exchange_n(&exiting, 1, __ATOMIC_ACQ_REL))
+    for (;;)
+      pause(); // another thread is already exiting
+
+  debugPrintf("port_exit: code=%d\n", code);
+  fflush(stdout);
+  fflush(stderr);
+  _exit(code);
+}
+
 void ExitAndroidGame(int code) {
-  // deinit openal
-  deinit_openal();
-  // deinit EGL
-  deinit_opengl();
-  // unmap lib
-  so_unload();
-  // die
-  // exit(0); // doesn't actually exit?
-  extern void NX_NORETURN __libnx_exit(int rc);
-  __libnx_exit(0);
+  port_exit(code);
 }
 
 // OS_ThreadMakeCurrent / OS_ThreadUnmakeCurrent — the game stores EGL objects

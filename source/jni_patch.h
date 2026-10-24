@@ -1,7 +1,7 @@
 #ifndef __JNI_PATCH_H__
 #define __JNI_PATCH_H__
 
-#include <switch.h>
+#include "pad.h"
 
 void *NVThreadGetCurrentJNIEnv(void);
 

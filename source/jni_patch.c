@@ -6,7 +6,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
-#include <switch.h>
+#include "pad.h"
 #include <SDL2/SDL.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -130,8 +130,6 @@ typedef struct
 static char fake_vm[0x1000];
 static char fake_env[0x1000];
 static void *natives;
-static PadState g_jni_pad;
-static int g_jni_pad_initialized = 0;
 static int g_jni_pad_connected = -1;
 static u64 g_jni_pad_buttons = 0;
 static float g_jni_pad_axes[6];
@@ -182,30 +180,48 @@ static float jni_gamepad_deadzone(float val)
   return val;
 }
 
-static void jni_gamepad_update(void)
+static int sdl_gamepad_init(void);
+static int sdl_gamepad_open_first(void);
+static void sdl_gamepad_log(const char *fmt, ...);
+
+// returns 1 if a controller is open and attached
+static int jni_gamepad_update(void)
 {
-  if (!g_jni_pad_initialized)
+  if (!sdl_gamepad_init())
+    return 0;
+
+  if (g_sdl_gamepad && !SDL_GameControllerGetAttached(g_sdl_gamepad))
   {
-    padConfigureInput(8, HidNpadStyleSet_NpadStandard);
-    padInitializeDefault(&g_jni_pad);
-    g_jni_pad_initialized = 1;
-    debugPrintf("jni_gamepad: initialized\n");
+    sdl_gamepad_log("detached");
+    SDL_GameControllerClose(g_sdl_gamepad);
+    g_sdl_gamepad = NULL;
   }
 
-  padUpdate(&g_jni_pad);
+  // reads device state (and detects hotplugged pads)
+  SDL_GameControllerUpdate();
+
+  if (!g_sdl_gamepad)
+    sdl_gamepad_open_first();
+
+  return g_sdl_gamepad != NULL;
 }
 
 static void jni_gamepad_sample(int *connected_out, u64 *buttons_out, float axes_out[6])
 {
-  const float scale = 1.f / (float)0x7fff;
+  const float scale = 1.0f / 32767.0f;
+  SDL_GameController *pad;
+  u64 buttons = 0;
+  float lt, rt;
+  int connected;
   int i;
 
-  jni_gamepad_update();
+  connected = jni_gamepad_update();
+  pad = g_sdl_gamepad;
 
   if (connected_out)
-    *connected_out = padIsConnected(&g_jni_pad);
+    *connected_out = connected;
 
-  if (!padIsConnected(&g_jni_pad))
+  if (!connected)
   {
     if (buttons_out)
       *buttons_out = 0;
@@ -217,21 +233,67 @@ static void jni_gamepad_sample(int *connected_out, u64 *buttons_out, float axes_
     return;
   }
 
-  u64 buttons = padGetButtons(&g_jni_pad);
-  HidAnalogStickState left = padGetStickPos(&g_jni_pad, 0);
-  HidAnalogStickState right = padGetStickPos(&g_jni_pad, 1);
+  // Positional mapping onto the Switch-layout masks the input tables use:
+  // SDL A = bottom face button = Switch B ("south"), SDL B = right = Switch A, etc.
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A))
+    buttons |= HidNpadButton_B;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_B))
+    buttons |= HidNpadButton_A;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_X))
+    buttons |= HidNpadButton_Y;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_Y))
+    buttons |= HidNpadButton_X;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_START))
+    buttons |= HidNpadButton_Plus;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_BACK))
+    buttons |= HidNpadButton_Minus;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
+    buttons |= HidNpadButton_L;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER))
+    buttons |= HidNpadButton_R;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_LEFTSTICK))
+    buttons |= HidNpadButton_StickL;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_RIGHTSTICK))
+    buttons |= HidNpadButton_StickR;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_UP))
+    buttons |= HidNpadButton_Up;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
+    buttons |= HidNpadButton_Down;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+    buttons |= HidNpadButton_Left;
+  if (SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+    buttons |= HidNpadButton_Right;
+
+  lt = (float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) * scale;
+  rt = (float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) * scale;
+  if (lt < 0.0f)
+    lt = 0.0f;
+  if (rt < 0.0f)
+    rt = 0.0f;
+  if (lt > 0.5f)
+    buttons |= HidNpadButton_ZL;
+  if (rt > 0.5f)
+    buttons |= HidNpadButton_ZR;
+
+  // Select + Start: exit at any time
+  if ((buttons & HidNpadButton_Plus) && (buttons & HidNpadButton_Minus))
+  {
+    debugPrintf("jni_gamepad: Select+Start -> exit\n");
+    port_exit(0);
+  }
 
   if (buttons_out)
     *buttons_out = buttons;
 
+  // SDL stick Y is already down-positive (Android convention); no negation
   if (axes_out)
   {
-    axes_out[0] = jni_gamepad_deadzone((float)left.x * scale);
-    axes_out[1] = jni_gamepad_deadzone((float)left.y * -scale);
-    axes_out[2] = jni_gamepad_deadzone((float)right.x * scale);
-    axes_out[3] = jni_gamepad_deadzone((float)right.y * -scale);
-    axes_out[4] = (buttons & HidNpadButton_ZL) ? 1.0f : 0.0f;
-    axes_out[5] = (buttons & HidNpadButton_ZR) ? 1.0f : 0.0f;
+    axes_out[0] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) * scale);
+    axes_out[1] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) * scale);
+    axes_out[2] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTX) * scale);
+    axes_out[3] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_RIGHTY) * scale);
+    axes_out[4] = lt;
+    axes_out[5] = rt;
   }
 }
 
@@ -309,91 +371,12 @@ static int sdl_gamepad_init(void)
   }
 
   g_sdl_gamepad_initialized = 1;
+  // state is polled; nothing drains the event queue, so don't fill it
+  SDL_GameControllerEventState(SDL_IGNORE);
+  SDL_JoystickEventState(SDL_IGNORE);
   sdl_gamepad_log("initialized");
   sdl_gamepad_open_first();
   return 1;
-}
-
-static void sdl_gamepad_sample(int *connected_out, int *buttons_out, float axes_out[6])
-{
-  const float axis_scale = 1.0f / 32767.0f;
-  int connected = 0;
-  int buttons = 0;
-
-  if (connected_out)
-    *connected_out = 0;
-  if (buttons_out)
-    *buttons_out = 0;
-  if (axes_out)
-    memset(axes_out, 0, sizeof(float) * 6);
-
-  if (!sdl_gamepad_init())
-    return;
-
-  if (g_sdl_gamepad && !SDL_GameControllerGetAttached(g_sdl_gamepad))
-  {
-    sdl_gamepad_log("detached");
-    SDL_GameControllerClose(g_sdl_gamepad);
-    g_sdl_gamepad = NULL;
-  }
-
-  if (!g_sdl_gamepad)
-    sdl_gamepad_open_first();
-
-  SDL_PumpEvents();
-  SDL_GameControllerUpdate();
-
-  if (g_sdl_gamepad && SDL_GameControllerGetAttached(g_sdl_gamepad))
-  {
-    connected = 1;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_A))
-      buttons |= 0x1;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_B))
-      buttons |= 0x2;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_X))
-      buttons |= 0x4;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_Y))
-      buttons |= 0x8;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_START))
-      buttons |= 0x10;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_BACK))
-      buttons |= 0x20;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
-      buttons |= 0x40;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER))
-      buttons |= 0x80;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_DPAD_UP))
-      buttons |= 0x100;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
-      buttons |= 0x200;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
-      buttons |= 0x400;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
-      buttons |= 0x800;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_LEFTSTICK))
-      buttons |= 0x1000;
-    if (SDL_GameControllerGetButton(g_sdl_gamepad, SDL_CONTROLLER_BUTTON_RIGHTSTICK))
-      buttons |= 0x2000;
-
-    if (axes_out)
-    {
-      axes_out[0] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_LEFTX) * axis_scale);
-      axes_out[1] = jni_gamepad_deadzone((float)-SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_LEFTY) * axis_scale);
-      axes_out[2] = jni_gamepad_deadzone((float)SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_RIGHTX) * axis_scale);
-      axes_out[3] = jni_gamepad_deadzone((float)-SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_RIGHTY) * axis_scale);
-      axes_out[4] = (float)SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32767.0f;
-      axes_out[5] = (float)SDL_GameControllerGetAxis(g_sdl_gamepad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32767.0f;
-      if (axes_out[4] < 0.0f)
-        axes_out[4] = 0.0f;
-      if (axes_out[5] < 0.0f)
-        axes_out[5] = 0.0f;
-    }
-  }
-
-  if (connected_out)
-    *connected_out = connected;
-  if (buttons_out)
-    *buttons_out = buttons;
 }
 
 int GetDeviceInfo(void)
@@ -749,7 +732,7 @@ void CallVoidMethodV(void *env, void *obj, int methodID, va_list args)
   }
   case QUIT:
     debugPrintf("JNI quit()\n");
-    return;
+    port_exit(0);
   default:
     debugPrintf("CallVoidMethodV: unknown methodID %d\n", methodID);
     return;
@@ -916,7 +899,7 @@ int jni_async_file_pump(double delta_hint)
     return 0;
   }
 
-  now_ns = armGetSystemTick() * 1000000000ULL / armGetSystemTickFreq();
+  now_ns = mono_ns();
   delta = delta_hint;
   if (g_async_last_pump_ns == 0)
     g_async_last_pump_ns = now_ns;
@@ -1350,8 +1333,7 @@ void jni_start(void)
   int last_swap_count = 0;
   uint64_t last_swap_progress_ns = 0;
   uint64_t last_frame_ns = 0;
-  // Use armGetSystemTick for timing: ticks at 19.2 MHz on Switch
-  last_frame_ns = armGetSystemTick() * 1000000000ULL / armGetSystemTickFreq();
+  last_frame_ns = mono_ns();
   last_swap_count = diag_get_swap_count();
   last_swap_progress_ns = last_frame_ns;
 
@@ -1384,7 +1366,7 @@ void jni_start(void)
     }
 
     // Compute delta time in seconds (like Android's ExecutorThread.guardedRun)
-    uint64_t now_ns = armGetSystemTick() * 1000000000ULL / armGetSystemTickFreq();
+    uint64_t now_ns = mono_ns();
     float delta = (float)(now_ns - last_frame_ns) / 1000000000.0f;
     if (delta <= 0.0f || delta > 1.0f)
       delta = 0.016f; // clamp to sane range
@@ -1538,10 +1520,10 @@ void jni_start(void)
     saved_implOnDrawFrame(fake_env, NULL, delta);
     frame++;
     {
-      uint64_t frame_end_ns = armGetSystemTick() * 1000000000ULL / armGetSystemTickFreq();
+      uint64_t frame_end_ns = mono_ns();
       uint64_t next_frame_ns = last_frame_ns + target_frame_ns;
       if (frame_end_ns < next_frame_ns)
-        svcSleepThread((int64_t)(next_frame_ns - frame_end_ns));
+        sleep_ns(next_frame_ns - frame_end_ns);
     }
   }
 }

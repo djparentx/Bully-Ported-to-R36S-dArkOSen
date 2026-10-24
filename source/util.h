@@ -10,6 +10,7 @@
 #define __UTIL_H__
 
 #include <stdint.h>
+#include <time.h>
 
 int debugPrintf(const char *text, ...);
 void debugPrintf_setMainThread(void);
@@ -22,6 +23,19 @@ int retm1(void);
 static inline uint64_t umin(uint64_t a, uint64_t b)
 {
   return (a < b) ? a : b;
+}
+
+static inline uint64_t mono_ns(void)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+static inline void sleep_ns(uint64_t ns)
+{
+  struct timespec ts = {(time_t)(ns / 1000000000ULL), (long)(ns % 1000000000ULL)};
+  nanosleep(&ts, NULL);
 }
 
 #endif
