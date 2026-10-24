@@ -68,6 +68,74 @@ unpin() {
 	[ -n "$2" ] && [ "$2" != none ] && put "$2" "$1/min_freq"
 }
 
+# zram swap: forced to ZRAM_SIZE with high swappiness while the game runs, so
+# idle memory (EmulationStation) moves to compressed swap; put back on exit
+ZRAM=/sys/block/zram0
+ZRAM_SIZE="${BULLY_ZRAM_SIZE:-805306368}" # 768 MB
+SWAPPINESS="${BULLY_SWAPPINESS:-100}"
+ZSAVED=/dev/shm/bully-zram
+
+# root commands: sudo without a password, or nothing
+run() {
+	[ "$SUDO" = none ] && return 1
+	$SUDO "$@"
+}
+
+zram_algo() {
+	local a
+	a=$(sed -n 's/.*\[\(.*\)\].*/\1/p' "$ZRAM/comp_algorithm" 2> /dev/null)
+	echo "${a:-none}"
+}
+zram_prio() {
+	local p
+	p=$(awk '$1 == "/dev/zram0" { print $5 }' /proc/swaps)
+	echo "${p:-none}"
+}
+zram_active() { grep -q '^/dev/zram0 ' /proc/swaps; }
+
+# size in bytes, compression algorithm, swap priority
+zram_set() {
+	if zram_active; then
+		run swapoff /dev/zram0 || return 1
+	fi
+	put 1 "$ZRAM/reset"
+	[ "$2" != none ] && put "$2" "$ZRAM/comp_algorithm"
+	put "$1" "$ZRAM/disksize" || return 1
+	run mkswap /dev/zram0 > /dev/null 2>&1 || return 1
+	if [ "$3" -ge 0 ] 2> /dev/null; then
+		run swapon -p "$3" /dev/zram0
+	else
+		run swapon /dev/zram0
+	fi
+}
+
+zram_force() {
+	[ -d "$ZRAM" ] || return
+	# after a crash the file still holds the originals: keep them
+	if [ ! -f "$ZSAVED" ]; then
+		local on=0
+		zram_active && on=1
+		echo "$(rd "$ZRAM/disksize") $(zram_algo) $(zram_prio) $on $(rd /proc/sys/vm/swappiness)" > "$ZSAVED"
+	fi
+	put "$SWAPPINESS" /proc/sys/vm/swappiness
+	if [ "$(rd "$ZRAM/disksize")" = "$ZRAM_SIZE" ] && zram_active; then
+		return
+	fi
+	zram_set "$ZRAM_SIZE" "$(zram_algo)" "$(zram_prio)" ||
+		echo "zram: resize to $ZRAM_SIZE bytes failed, left as it was"
+}
+
+zram_restore() {
+	[ -f "$ZSAVED" ] || return
+	read -r z_size z_algo z_prio z_on z_swappiness < "$ZSAVED"
+	if [ "$(rd "$ZRAM/disksize")" != "$z_size" ]; then
+		zram_set "$z_size" "$z_algo" "$z_prio"
+	fi
+	[ "$z_on" = 0 ] && zram_active && run swapoff /dev/zram0
+	[ -n "$z_swappiness" ] && [ "$z_swappiness" != none ] && put "$z_swappiness" /proc/sys/vm/swappiness
+	rm -f "$ZSAVED"
+}
+
 restore() {
 	if [ -f "$SAVED" ]; then
 		read -r s_gov s_gpu_min s_gpu_max < "$SAVED"
@@ -78,10 +146,11 @@ restore() {
 }
 restore
 echo "$(rd "$CPU") $(rd "$GPU/min_freq") $(rd "$GPU/max_freq")" > "$SAVED"
-trap restore EXIT
+trap 'restore; zram_restore' EXIT
 
 put performance "$CPU"
 [ -n "$GPU" ] && pin "$GPU" "$(step_at_most "$GPU" "$GPU_MAX_HZ")"
+zram_force
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
@@ -118,6 +187,8 @@ kv "dmc min/max/cur"  "$(rd "$DMC/min_freq") / $(rd "$DMC/max_freq") / $(rd "$DM
 kv "SDL_VIDEODRIVER"  "$SDL_VIDEODRIVER"
 kv "SDL_AUDIODRIVER"  "$SDL_AUDIODRIVER"
 kv "controls"         "${controlfolder:-fallback mapping}"
+kv "zram"             "$(rd "$ZRAM/disksize") bytes, $(zram_algo), priority $(zram_prio)"
+kv "swappiness"       "$(rd /proc/sys/vm/swappiness)"
 
 # the game files come from the APK: the binary installs them on first start
 if [ ! -s bully ]; then
