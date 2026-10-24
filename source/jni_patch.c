@@ -738,6 +738,8 @@ void CallVoidMethodV(void *env, void *obj, int methodID, va_list args)
     (void)va_arg(args, void *); // java.util.Map (ignored)
     debugPrintf("JNI rockstarLogBreadcrumb(%s, %s)\n",
                 cat ? cat : "(null)", msg ? msg : "(null)");
+    if (cat && msg && !strcmp(cat, "transition") && strstr(msg, "player area"))
+      memory_area_changed();
     return;
   }
   case HTTP_HEAD:

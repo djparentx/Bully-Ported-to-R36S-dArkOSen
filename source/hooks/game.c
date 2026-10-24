@@ -7,6 +7,7 @@
  */
 
 #include <math.h>
+#include <malloc.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -1930,6 +1931,139 @@ static void OrigPretick_hook(void *this_ptr, int flag) {
   nx_input_refresh_snapshot();
   OrigPretick_real(this_ptr, flag);
 }
+// ============================================================================
+// Memory budget (same patches as the earlier R36S port)
+// - TextureHeapHelper::GetTotalGraphicsMemoryOfSystem reports 256 MB, so the
+//   game sizes its texture heap for that instead of the whole system.
+// - CGame::ms_bTidyTextureMemory is set on every area change and every 30 s,
+//   which makes the game release textures it no longer uses.
+// - malloc_trim(0) every 10 s and on area changes hands freed heap back.
+// - Renderer::SetEmergencyMeasures(level) is capped at 0.5 through the
+//   renderer vtables.
+// ============================================================================
+#define TEXTURE_MEMORY_BUDGET (256ull * 1024 * 1024)
+#define EMERGENCY_MEASURES_SLOT 0xc8 // byte offset from the vtable symbol (entry 23)
+#define RENDERER_VTABLES 3
+
+static volatile uint8_t *s_tidy_texture_memory = NULL;
+static void (*Renderer_SetEmergencyMeasures_real)(void *this_ptr, float level) = NULL;
+static uintptr_t s_renderer_vtables[RENDERER_VTABLES];
+static const char *const s_renderer_vtable_names[RENDERER_VTABLES] = {
+    "_ZTV10RendererES", "_ZTV11RendererES2", "_ZTV11RendererES3"};
+
+static uint64_t TextureHeapHelper_GetTotalGraphicsMemoryOfSystem_hook(void)
+{
+  return TEXTURE_MEMORY_BUDGET;
+}
+
+static void Renderer_SetEmergencyMeasures_hook(void *this_ptr, float level)
+{
+  if (!(level <= 0.5f))
+    level = 0.5f;
+  Renderer_SetEmergencyMeasures_real(this_ptr, level);
+}
+
+static long vmrss_kb(void)
+{
+  char line[128];
+  long kb = -1;
+  FILE *f = fopen("/proc/self/status", "r");
+
+  if (!f)
+    return -1;
+  while (fgets(line, sizeof(line), f))
+  {
+    if (!strncmp(line, "VmRSS:", 6))
+    {
+      kb = strtol(line + 6, NULL, 10);
+      break;
+    }
+  }
+  fclose(f);
+  return kb;
+}
+
+static void memory_tidy_textures(void)
+{
+  if (s_tidy_texture_memory)
+    *s_tidy_texture_memory = 1;
+}
+
+// called from the rockstarLogBreadcrumb JNI handler on area changes
+void memory_area_changed(void)
+{
+  long kb = vmrss_kb();
+
+  memory_tidy_textures();
+  malloc_trim(0);
+  logPrintf("memory: area change, VmRSS %ld kB, textures tidied, heap trimmed\n", kb);
+}
+
+static void *memory_thread(void *arg)
+{
+  unsigned ticks = 0;
+
+  (void)arg;
+  for (;;)
+  {
+    sleep(10);
+    malloc_trim(0);
+    if (++ticks % 3 == 0)
+      memory_tidy_textures();
+  }
+  return NULL;
+}
+
+// from patch_game(): symbol lookups and text hooks, before so_finalize()
+static void memory_patch_text(void)
+{
+  uintptr_t addr;
+  int i;
+
+  addr = so_try_find_addr("_ZN17TextureHeapHelper30GetTotalGraphicsMemoryOfSystemEv");
+  if (addr)
+    hook_arm64(addr, (uintptr_t)TextureHeapHelper_GetTotalGraphicsMemoryOfSystem_hook);
+  logPrintf("memory: texture budget      %s\n", addr ? "256 MB" : "not set (symbol missing)");
+
+  s_tidy_texture_memory =
+      (volatile uint8_t *)so_try_find_addr("_ZN5CGame21ms_bTidyTextureMemoryE");
+  logPrintf("memory: texture tidy flag   %s\n", s_tidy_texture_memory ? "found" : "missing");
+
+  Renderer_SetEmergencyMeasures_real =
+      (void (*)(void *, float))so_try_find_addr("_ZN8Renderer20SetEmergencyMeasuresEf");
+  for (i = 0; i < RENDERER_VTABLES; i++)
+    s_renderer_vtables[i] = so_try_find_addr(s_renderer_vtable_names[i]);
+}
+
+// from patch_game_post_finalize(): vtable patch and the trim thread
+static void memory_patch_data(void)
+{
+  pthread_attr_t attr;
+  pthread_t thread;
+  int i, patched = 0;
+
+  for (i = 0; i < RENDERER_VTABLES && Renderer_SetEmergencyMeasures_real; i++)
+  {
+    uintptr_t *slot;
+
+    if (!s_renderer_vtables[i])
+      continue;
+    slot = (uintptr_t *)(s_renderer_vtables[i] + EMERGENCY_MEASURES_SLOT);
+    if (*slot == (uintptr_t)Renderer_SetEmergencyMeasures_real)
+    {
+      *slot = (uintptr_t)Renderer_SetEmergencyMeasures_hook;
+      patched++;
+    }
+  }
+  logPrintf("memory: emergency measures  capped at 0.5 in %d of %d renderer vtables\n",
+            patched, RENDERER_VTABLES);
+
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  if (pthread_create(&thread, &attr, memory_thread, NULL) != 0)
+    logPrintf("memory: trim thread         failed to start\n");
+  pthread_attr_destroy(&attr);
+}
 
 void patch_game_post_finalize(void) {
   extern void *text_virtbase;
@@ -1949,6 +2083,7 @@ void patch_game_post_finalize(void) {
   *got_pre = (uintptr_t)OrigPretick_hook;
   debugPrintf("GOT-patched OrigPretick: real=%p hook=%p\n",
               (void *)OrigPretick_real, (void *)OrigPretick_hook);
+  memory_patch_data();
 }
 
 void patch_game(void) {
@@ -2009,6 +2144,9 @@ void patch_game(void) {
              (uintptr_t)BullySettings_ResetDisplay_hook);
   hook_arm64((uintptr_t)text_base + BULLY_SETTINGS_LOAD_PLT_OFFSET,
              (uintptr_t)BullySettings_Load_hook);
+
+  // memory budget: lookups and text hooks (vtables are patched after finalize)
+  memory_patch_text();
 
   // --- SYMBOLS BELOW DO NOT EXIST IN 64-BIT libGame.so ---
   // hook_arm64(so_find_addr("_Z20OS_ServiceAppCommandPKcS0_"),

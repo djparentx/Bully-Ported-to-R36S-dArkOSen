@@ -413,7 +413,7 @@ void so_execute_init_array(void)
   }
 }
 
-uintptr_t so_find_addr(const char *symbol)
+uintptr_t so_try_find_addr(const char *symbol)
 {
   for (int i = 0; i < num_syms; i++)
   {
@@ -422,8 +422,16 @@ uintptr_t so_find_addr(const char *symbol)
       return (uintptr_t)load_base + syms[i].st_value;
   }
 
-  fatal_error("Error: could not find symbol:\n%s\n", symbol);
   return 0;
+}
+
+uintptr_t so_find_addr(const char *symbol)
+{
+  uintptr_t addr = so_try_find_addr(symbol);
+
+  if (!addr)
+    fatal_error("Error: could not find symbol:\n%s\n", symbol);
+  return addr;
 }
 
 uintptr_t so_find_rel_addr(const char *symbol)

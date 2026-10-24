@@ -10,6 +10,7 @@ void patch_opengl(void);
 void patch_openal(void);
 void patch_game(void);
 void patch_game_post_finalize(void);
+void memory_area_changed(void); // hooks/game.c: tidy textures + trim heap
 void patch_io(void);
 void openal_set_runtime_enabled(int enabled);
 
