@@ -154,6 +154,7 @@ zram_force
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
+export ALSOFT_DRIVERS=alsa
 
 # the handheld's controls from PortMaster; fallback is the GO-Super Gamepad mapping
 for d in /opt/system/Tools/PortMaster /opt/tools/PortMaster /roms/tools/PortMaster /roms2/tools/PortMaster /roms/ports/PortMaster /roms2/ports/PortMaster; do
