@@ -169,10 +169,11 @@ int zip_fs_open(const char *path, int flags)
   if (!f)
     return -1;
 
-  // Extract to a temp file on sdmc and return its fd
+  // Extract to a temp file in the game folder (cwd) and return its fd.
+  // Not /tmp: it's RAM-backed and the file lives until the fd closes.
   static int tmp_id = 0;
   char tmp[256];
-  snprintf(tmp, sizeof(tmp), "sdmc:/switch/bully/.tmp_%d", tmp_id++);
+  snprintf(tmp, sizeof(tmp), ".tmp_%d", tmp_id++);
   int fd = open(tmp, O_RDWR | O_CREAT | O_TRUNC, 0666);
   if (fd < 0)
   {

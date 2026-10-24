@@ -8,7 +8,7 @@
  * applies relocations, and exports a symbol lookup function.
  */
 
-#include <switch.h>
+#include <sys/mman.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -243,6 +243,19 @@ static int posix_memalign_stub(void **memptr, size_t alignment, size_t size)
   return *memptr ? 0 : ENOMEM;
 }
 
+// bionic (LP64) pthread_mutex_t is 40 bytes; glibc's is 48 and its
+// pthread_mutex_init clears all 48, overrunning bionic-sized objects.
+// glibc's mutex fields end at byte 40, so init a temp and copy 40 back.
+#define BIONIC_PTHREAD_MUTEX_SIZE 40
+static int pthread_mutex_init_bionic(pthread_mutex_t *m, const pthread_mutexattr_t *attr)
+{
+  pthread_mutex_t tmp;
+  int ret = pthread_mutex_init(&tmp, attr);
+  if (ret == 0)
+    memcpy(m, &tmp, BIONIC_PTHREAD_MUTEX_SIZE);
+  return ret;
+}
+
 extern uint8_t fake_sF[3][0x100];
 extern void free_wrapper(void *ptr);
 extern void *realloc_wrapper(void *ptr, size_t size);
@@ -336,7 +349,7 @@ static DynLibFunction cpplib_imports[] = {
     {"pthread_equal", (uintptr_t)&pthread_equal},
     {"pthread_join", (uintptr_t)&pthread_join},
     {"pthread_mutex_destroy", (uintptr_t)&pthread_mutex_destroy},
-    {"pthread_mutex_init", (uintptr_t)&pthread_mutex_init},
+    {"pthread_mutex_init", (uintptr_t)&pthread_mutex_init_bionic},
     {"pthread_mutex_lock", (uintptr_t)&pthread_mutex_lock},
     {"pthread_mutex_trylock", (uintptr_t)&pthread_mutex_trylock},
     {"pthread_mutex_unlock", (uintptr_t)&pthread_mutex_unlock},
@@ -383,7 +396,7 @@ static DynLibFunction cpplib_imports[] = {
     {"getenv", (uintptr_t)&getenv},
 
     // errno
-    {"__errno", (uintptr_t)&__errno},
+    {"__errno", (uintptr_t)&__errno_location},
 
     // __cxa
     {"__cxa_atexit", (uintptr_t)&__cxa_atexit},
@@ -536,22 +549,14 @@ int cpplib_load(const char *filename)
   cpplib_load_size = CPPLIB_ALIGN(max_vaddr - min_vaddr, 0x1000);
   cpplib_min_vaddr = min_vaddr;
 
-  // Allocate memory
-  cpplib_base = memalign(0x1000, cpplib_load_size);
-  if (!cpplib_base)
+  if (!local_syms || !local_dynstr)
   {
+    debugPrintf("cpplib: no symtab/strtab\n");
+    munmap(cpplib_base, cpplib_load_size);
+    cpplib_base = cpplib_virtbase = NULL;
     free(file_buf);
-    return -4;
+    return -5;
   }
-  memset(cpplib_base, 0, cpplib_load_size);
-
-  // Reserve virtual memory for executable mapping BEFORE relocations
-  // so all internal pointers use the virtual (executable) address
-  virtmemLock();
-  cpplib_virtbase = virtmemFindCodeMemory(cpplib_load_size, 0x1000);
-  VirtmemReservation *rv = virtmemAddReservation(cpplib_virtbase, cpplib_load_size);
-  (void)rv; // suppress unused warning
-  virtmemUnlock();
 
   debugPrintf("cpplib: loading %s at %p -> %p (size=%u KB)\n",
               filename, cpplib_base, cpplib_virtbase, (unsigned)(cpplib_load_size / 1024));
@@ -589,7 +594,8 @@ int cpplib_load(const char *filename)
   if (!local_syms || !local_dynstr)
   {
     debugPrintf("cpplib: no symtab/strtab\n");
-    free(cpplib_base);
+    munmap(cpplib_base, cpplib_load_size);
+    cpplib_base = cpplib_virtbase = NULL;
     free(file_buf);
     return -5;
   }
@@ -706,48 +712,19 @@ int cpplib_load(const char *filename)
 
   debugPrintf("cpplib: loaded %d symbols (%d defined funcs)\n", cpplib_num_syms, defined_count);
 
-  // Make code executable via svcMapProcessCodeMemory (same as so_finalize)
-  debugPrintf("cpplib: mapping code at %p -> %p\n", cpplib_base, cpplib_virtbase);
-
-  Result rc = svcMapProcessCodeMemory(envGetOwnProcessHandle(),
-                                      (u64)cpplib_virtbase, (u64)cpplib_base, cpplib_load_size);
-  if (R_FAILED(rc))
+  // Text R+X, the rest stays R+W from mmap (cpplib_base == cpplib_virtbase on Linux)
+  size_t text_asize = CPPLIB_ALIGN(text_end, 0x1000);
+  if (text_asize > 0 && mprotect(cpplib_virtbase, text_asize, PROT_READ | PROT_EXEC) < 0)
   {
-    debugPrintf("cpplib: svcMapProcessCodeMemory failed: %08x\n", rc);
+    debugPrintf("cpplib: RX mprotect failed: errno=%d\n", errno);
     free(file_buf);
     return -6;
   }
 
-  // Set text as RX, data as RW
-  u64 text_asize = CPPLIB_ALIGN(text_end, 0x1000);
-  if (text_asize > 0)
-  {
-    rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(),
-                                       (u64)cpplib_virtbase, text_asize, Perm_Rx);
-    if (R_FAILED(rc))
-      debugPrintf("cpplib: RX perm failed: %08x\n", rc);
-  }
-
-  u64 rest_asize = cpplib_load_size - text_asize;
-  if (rest_asize > 0)
-  {
-    rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(),
-                                       (u64)cpplib_virtbase + text_asize, rest_asize, Perm_Rw);
-    if (R_FAILED(rc))
-      debugPrintf("cpplib: RW perm failed: %08x\n", rc);
-  }
-
   // Flush caches for the new code region
-  armDCacheFlush(cpplib_virtbase, cpplib_load_size);
-  armICacheInvalidate(cpplib_virtbase, cpplib_load_size);
+  __builtin___clear_cache((char *)cpplib_virtbase, (char *)cpplib_virtbase + cpplib_load_size);
 
   debugPrintf("cpplib: code mapped and executable\n");
-
-  // Update symtab/strtab pointers to the virtual mapping
-  // (heap pages are now Perm_None after svcMapProcessCodeMemory)
-  ptrdiff_t virt_offset = (uintptr_t)cpplib_virtbase - (uintptr_t)cpplib_base;
-  cpplib_syms = (Elf64_Sym *)((uintptr_t)cpplib_syms + virt_offset);
-  cpplib_dynstrtab = (char *)((uintptr_t)cpplib_dynstrtab + virt_offset);
 
   free(file_buf);
   return 0;

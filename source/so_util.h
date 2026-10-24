@@ -30,7 +30,7 @@ void hook_addr_ret0(uintptr_t addr);
 
 void so_flush_caches(void);
 void so_free_temp(void);
-int so_load(const char *filename, void *base, size_t max_size);
+int so_load(const char *filename);
 int so_relocate(void);
 int so_resolve(DynLibFunction *funcs, int num_funcs, int taint_missing_imports);
 void so_execute_init_array(void);

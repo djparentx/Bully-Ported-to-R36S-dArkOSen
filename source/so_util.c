@@ -6,7 +6,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
-#include <switch.h>
+#include <sys/mman.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,7 +29,6 @@ size_t data_size;
 
 static void *load_base, *load_virtbase;
 static size_t load_size;
-static VirtmemReservation *load_memrv;
 
 static void *so_base;
 
@@ -130,8 +129,7 @@ void hook_addr_ret0(uintptr_t addr)
 
 void so_flush_caches(void)
 {
-  armDCacheFlush(load_virtbase, load_size);
-  armICacheInvalidate(load_virtbase, load_size);
+  __builtin___clear_cache((char *)load_virtbase, (char *)load_virtbase + load_size);
 }
 
 void so_free_temp(void)
@@ -142,28 +140,13 @@ void so_free_temp(void)
 
 void so_finalize(void)
 {
-  Result rc = 0;
-
-  // map the entire thing as code memory
-  rc = svcMapProcessCodeMemory(envGetOwnProcessHandle(), (u64)load_virtbase, (u64)load_base, load_size);
-  if (R_FAILED(rc))
-    fatal_error("Error: svcMapProcessCodeMemory failed:\n%08x", rc);
-
-  // map code sections as R+X
-  const u64 text_asize = ALIGN_MEM(text_size, 0x1000); // align to page
-  rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)text_virtbase, text_asize, Perm_Rx);
-  if (R_FAILED(rc))
-    fatal_error("Error: could not map %u bytes of RX memory at %p:\n%08x", text_asize, text_virtbase, rc);
-
-  // map the rest as R+W
-  const u64 rest_asize = load_size - text_asize;
-  const uintptr_t rest_virtbase = (uintptr_t)text_virtbase + text_asize;
-  rc = svcSetProcessMemoryPermission(envGetOwnProcessHandle(), rest_virtbase, rest_asize, Perm_Rw);
-  if (R_FAILED(rc))
-    fatal_error("Error: could not map %u bytes of RW memory at %p (%p) (2):\n%08x", rest_asize, data_virtbase, rest_virtbase, rc);
+  // map code sections as R+X; everything after the text stays R+W from mmap
+  const size_t text_asize = ALIGN_MEM(text_size, 0x1000); // align to page
+  if (mprotect(text_virtbase, text_asize, PROT_READ | PROT_EXEC) < 0)
+    fatal_error("Error: could not map %zu bytes of RX memory at %p", text_asize, text_virtbase);
 }
 
-int so_load(const char *filename, void *base, size_t max_size)
+int so_load(const char *filename)
 {
   int res = 0;
   size_t so_size = 0;
@@ -226,24 +209,18 @@ int so_load(const char *filename, void *base, size_t max_size)
 
   // align total size to page size
   load_size = ALIGN_MEM(load_size, 0x1000);
-  if (load_size > max_size)
+
+  // one anonymous RW mapping for all LOAD segments (zero-filled by the kernel).
+  // Linux needs no separate code alias: load_base == load_virtbase, and
+  // so_finalize() flips the text pages to R+X in place.
+  load_base = mmap(NULL, load_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (load_base == MAP_FAILED)
   {
+    load_base = NULL;
     res = -3;
     goto err_free_so;
   }
-
-  // allocate space for all load segments (align to page size)
-  // TODO: find out a way to allocate memory that doesn't fuck with the heap
-  load_base = base;
-  if (!load_base)
-    goto err_free_so;
-  memset(load_base, 0, load_size);
-
-  // reserve virtual memory space for the entire LOAD zone while we're fucking with the ELF
-  virtmemLock();
-  load_virtbase = virtmemFindCodeMemory(load_size, 0x1000);
-  load_memrv = virtmemAddReservation(load_virtbase, load_size);
-  virtmemUnlock();
+  load_virtbase = load_base;
 
   debugPrintf("load base = %p\n", load_virtbase);
 
@@ -299,10 +276,8 @@ int so_load(const char *filename, void *base, size_t max_size)
   return 0;
 
 err_free_load:
-  virtmemLock();
-  virtmemRemoveReservation(load_memrv);
-  virtmemUnlock();
-  free(load_base);
+  munmap(load_base, load_size);
+  load_base = load_virtbase = NULL;
 err_free_so:
   free(so_base);
 
@@ -510,16 +485,8 @@ int so_unload(void)
     so_free_temp();
   }
 
-  // remap text as RW
-  const u64 text_asize = ALIGN_MEM(text_size, 0x1000); // align to page
-  svcSetProcessMemoryPermission(envGetOwnProcessHandle(), (u64)text_virtbase, text_asize, Perm_Rw);
-  // unmap everything
-  svcUnmapProcessCodeMemory(envGetOwnProcessHandle(), (u64)load_virtbase, (u64)load_base, load_size);
-
-  // release virtual address range
-  virtmemLock();
-  virtmemRemoveReservation(load_memrv);
-  virtmemUnlock();
+  munmap(load_base, load_size);
+  load_base = load_virtbase = NULL;
 
   return 0;
 }

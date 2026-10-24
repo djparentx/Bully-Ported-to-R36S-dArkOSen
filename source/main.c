@@ -10,7 +10,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <switch.h>
+#include <limits.h>
 
 #include "config.h"
 #include "util.h"
@@ -19,46 +19,6 @@
 #include "hooks.h"
 #include "imports.h"
 #include "zip_fs.h"
-
-static void *heap_so_base = NULL;
-static size_t heap_so_limit = 0;
-
-// provide replacement heap init function to separate newlib heap from the .so
-void __libnx_initheap(void)
-{
-  void *addr;
-  size_t size = 0, fake_heap_size = 0;
-  size_t mem_available = 0, mem_used = 0;
-
-  if (envHasHeapOverride())
-  {
-    addr = envGetHeapOverrideAddr();
-    size = envGetHeapOverrideSize();
-  }
-  else
-  {
-    svcGetInfo(&mem_available, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0);
-    svcGetInfo(&mem_used, InfoType_UsedMemorySize, CUR_PROCESS_HANDLE, 0);
-    if (mem_available > mem_used + 0x200000)
-      size = (mem_available - mem_used - 0x200000) & ~0x1FFFFF;
-    if (size == 0)
-      size = 0x2000000 * 16;
-    Result rc = svcSetHeapSize(&addr, size);
-    if (R_FAILED(rc))
-      diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_HeapAllocFailed));
-  }
-
-  // only allocate a fixed amount for the newlib heap
-  extern char *fake_heap_start;
-  extern char *fake_heap_end;
-  fake_heap_size = umin(size, MEMORY_MB * 1024 * 1024);
-  fake_heap_start = (char *)addr;
-  fake_heap_end = (char *)addr + fake_heap_size;
-
-  heap_so_base = (char *)addr + fake_heap_size;
-  heap_so_base = (void *)ALIGN_MEM((uintptr_t)heap_so_base, 0x1000); // align to page size
-  heap_so_limit = (char *)addr + size - (char *)heap_so_base;
-}
 
 static void check_data(void)
 {
@@ -84,48 +44,29 @@ static void check_data(void)
   }
 }
 
-static void check_syscalls(void)
+// run from the binary's own folder so relative paths (assets/, savegames/, config.txt) resolve
+static void chdir_to_exe_dir(void)
 {
-  if (!envIsSyscallHinted(0x77))
-    fatal_error("svcMapProcessCodeMemory is unavailable.");
-  if (!envIsSyscallHinted(0x78))
-    fatal_error("svcUnmapProcessCodeMemory is unavailable.");
-  if (!envIsSyscallHinted(0x73))
-    fatal_error("svcSetProcessMemoryPermission is unavailable.");
-  if (envGetOwnProcessHandle() == INVALID_HANDLE)
-    fatal_error("Own process handle is unavailable.\nTitle Takeover required:\n1. Install a game in Ryujinx\n2. Hold R while launching it\n3. Select bully_nx.nro from Hbmenu");
-}
+  char path[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+  if (len <= 0)
+    return;
+  path[len] = '\0';
 
-static void set_screen_size(int w, int h)
-{
-  if (w <= 0 || h <= 0 || w > 1920 || h > 1080)
-  {
-    // auto; prefer 720p on both handheld and docked.
-    // Full 1080p docked works, but it drives GPU load unnecessarily high for
-    // this Android wrapper and leaves little headroom for the heavier scenes.
-    if (appletGetOperationMode() == AppletOperationMode_Console)
-    {
-      screen_width = 960;
-      screen_height = 540;
-    }
-    else
-    {
-      screen_width = 960;
-      screen_height = 540;
-    }
-  }
-  else
-  {
-    screen_width = w;
-    screen_height = h;
-  }
-  debugPrintf("screen mode: %dx%d\n", screen_width, screen_height);
+  char *slash = strrchr(path, '/');
+  if (!slash || slash == path)
+    return;
+  *slash = '\0';
+
+  if (chdir(path) < 0)
+    fatal_error("Could not enter game folder\n%s", path);
 }
 
 int main(void)
 {
   int compat_delay_ms = 0;
 
+  chdir_to_exe_dir();
   // try to read the config file and create one with default values if it's missing
   if (read_config(CONFIG_NAME) < 0)
     write_config(CONFIG_NAME);
@@ -137,23 +78,14 @@ int main(void)
 
   zip_fs_init();
 
-  check_syscalls();
   check_data();
-
-  // calculate actual screen size
-  set_screen_size(config.screen_width, config.screen_height);
-
-  debugPrintf("heap size = %u KB\n", MEMORY_MB * 1024);
-  debugPrintf(" lib base = %p\n", heap_so_base);
-  debugPrintf("  lib max = %u KB\n", heap_so_limit / 1024);
 
   // Load libc++_shared.so first — provides __ndk1 C++ stdlib symbols
   extern int cpplib_load(const char *filename);
   if (cpplib_load("libc++_shared.so") < 0)
     fatal_error("Could not load libc++_shared.so.\nCopy it from the APK\nlib/arm64-v8a/ folder\nto the game directory.");
 
-  if (so_load(SO_NAME, heap_so_base, heap_so_limit) < 0)
-    fatal_error("Could not load\n%s.", SO_NAME);
+  if (so_load(SO_NAME) < 0)
 
   // won't save without it
   mkdir("savegames", 0777);

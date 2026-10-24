@@ -6,7 +6,7 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
-#include <switch.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -36,41 +36,6 @@ void debugPrintf_setCompatDelayMs(int ms)
     ms = 20;
   s_compat_delay_ms = ms;
 }
-
-#ifdef DEBUG_LOG
-
-static int s_nxlinkSock = -1;
-
-static void initNxLink(void)
-{
-  if (R_FAILED(socketInitializeDefault()))
-    return;
-  s_nxlinkSock = nxlinkStdio();
-  if (s_nxlinkSock < 0)
-    socketExit();
-}
-
-static void deinitNxLink(void)
-{
-  if (s_nxlinkSock >= 0)
-  {
-    close(s_nxlinkSock);
-    socketExit();
-    s_nxlinkSock = -1;
-  }
-}
-
-void userAppInit(void)
-{
-  initNxLink();
-}
-
-void userAppExit(void)
-{
-  deinitNxLink();
-}
-
-#endif
 
 int debugPrintf(const char *text, ...)
 {
@@ -105,7 +70,10 @@ int debugPrintf(const char *text, ...)
   // startup/gameplay race in the port, so emulate a small portion of that
   // delay without actually writing debug.log.
   if (s_compat_delay_ms > 0)
-    svcSleepThread((int64_t)s_compat_delay_ms * 1000000LL);
+  {
+    struct timespec ts = {0, (long)s_compat_delay_ms * 1000000L};
+    nanosleep(&ts, NULL);
+  }
 #endif
 
   pthread_mutex_unlock(&s_log_mutex);

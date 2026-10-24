@@ -19,18 +19,6 @@ int ret0(void);
 int ret1(void);
 int retm1(void);
 
-static inline void *armGetTlsRw(void)
-{
-  void *ret;
-  __asm__("mrs %x[data], s3_3_c13_c0_2" : [data] "=r"(ret));
-  return ret;
-}
-
-static inline void armSetTlsRw(void *addr)
-{
-  __asm__("msr s3_3_c13_c0_2, %0" : : "r"(addr));
-}
-
 static inline uint64_t umin(uint64_t a, uint64_t b)
 {
   return (a < b) ? a : b;
