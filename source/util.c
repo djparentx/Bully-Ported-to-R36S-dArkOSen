@@ -56,6 +56,7 @@ int debugPrintf(const char *text, ...)
     va_start(list, text);
     vprintf(text, list);
     va_end(list);
+    fflush(stdout);
   }
 
   if (s_compat_delay_ms > 0)
@@ -77,6 +78,7 @@ int logPrintf(const char *text, ...)
   va_start(list, text);
   vprintf(text, list);
   va_end(list);
+  fflush(stdout); // on disk now: an out-of-memory kill drops anything still buffered
   pthread_mutex_unlock(&s_log_mutex);
   return 0;
 }
