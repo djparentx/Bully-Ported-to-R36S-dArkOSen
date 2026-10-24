@@ -1,4 +1,4 @@
-/* opengl.c -- OpenGL and shader generator hooks and patches
+/* opengl.c -- video: SDL2 KMSDRM window + GLES context, swap and optional render scaling
  *
  * Copyright (C) 2021 fgsfds, Andy Nguyen
  *
@@ -6,31 +6,78 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
-#include <switch.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <SDL2/SDL.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 
 #include "../config.h"
 #include "../util.h"
 #include "../so_util.h"
+#include "../hooks.h"
 
-// Global EGL objects - accessible from imports.c for EGL wrapper functions
+// Global EGL objects - read back from SDL's context; used by the EGL wrappers in imports.c
 EGLDisplay g_egl_display = EGL_NO_DISPLAY;
 EGLSurface g_egl_surface = EGL_NO_SURFACE;
 EGLContext g_egl_context = EGL_NO_CONTEXT;
 
-// Internal aliases for convenience
-#define display g_egl_display
-#define surface g_egl_surface
-#define context g_egl_context
+static SDL_Window *s_window = NULL;
+static SDL_GLContext s_glctx = NULL;
+static int s_panel_w = 0, s_panel_h = 0;
+
+// Render scale < 1.0: the game draws into this FBO at screen_width x screen_height
+// (framebuffer 0 is redirected to it) and video_swap() scales it to the panel.
+static GLuint s_fbo = 0, s_fbo_color = 0, s_fbo_depth = 0;
+
+static float video_render_scale(void)
+{
+  const char *s = getenv("BULLY_RENDER_SCALE");
+  float scale = s ? (float)atof(s) : 1.0f;
+  if (scale < 0.5f)
+    scale = 0.5f;
+  if (scale > 1.0f)
+    scale = 1.0f;
+  return scale;
+}
+
+static int video_create_fbo(void)
+{
+  glGenRenderbuffers(1, &s_fbo_color);
+  glBindRenderbuffer(GL_RENDERBUFFER, s_fbo_color);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, screen_width, screen_height);
+
+  glGenRenderbuffers(1, &s_fbo_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, s_fbo_depth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, screen_width, screen_height);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+  glGenFramebuffers(1, &s_fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, s_fbo);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, s_fbo_color);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s_fbo_depth);
+
+  GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE)
+  {
+    debugPrintf("video: FBO incomplete (0x%x), rendering at panel size\n", status);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &s_fbo);
+    glDeleteRenderbuffers(1, &s_fbo_color);
+    glDeleteRenderbuffers(1, &s_fbo_depth);
+    s_fbo = s_fbo_color = s_fbo_depth = 0;
+    return 0;
+  }
+
+  // stays bound: the game's "framebuffer 0" is this FBO from now on
+  return 1;
+}
 
 void NVEventEGLSwapBuffers(void)
 {
-  eglSwapBuffers(display, surface);
+  video_swap();
 }
 
 void NVEventEGLMakeCurrent(void)
@@ -43,70 +90,153 @@ void NVEventEGLUnmakeCurrent(void)
 
 int NVEventEGLInit(void)
 {
-  EGLint numConfigs = 0;
-  EGLConfig eglConfig;
+  SDL_DisplayMode mode;
 
-  const EGLint contextAttribs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
-      EGL_NONE};
+  if (s_window)
+    return 1;
 
-  const EGLint configAttribs[] = {
-      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES_BIT,
-      EGL_RED_SIZE, 8,
-      EGL_GREEN_SIZE, 8,
-      EGL_BLUE_SIZE, 8,
-      EGL_ALPHA_SIZE, 8,
-      EGL_DEPTH_SIZE, 24,
-      EGL_STENCIL_SIZE, 8,
-      EGL_NONE};
-
-  NWindow *win = nwindowGetDefault();
-
-  nwindowSetDimensions(win, screen_width, screen_height);
-
-  display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  if (!display)
+  if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
   {
-    debugPrintf("EGL: Could not connect to display: %08x\n", eglGetError());
+    debugPrintf("video: SDL video init failed: %s\n", SDL_GetError());
     return 0;
   }
 
-  eglInitialize(display, NULL, NULL);
-
-  if (eglBindAPI(EGL_OPENGL_ES_API) == EGL_FALSE)
+  if (SDL_GetDesktopDisplayMode(0, &mode) != 0)
   {
-    debugPrintf("EGL: Could not set API: %08x\n", eglGetError());
+    debugPrintf("video: no display mode: %s\n", SDL_GetError());
+    return 0;
+  }
+  s_panel_w = mode.w;
+  s_panel_h = mode.h;
+
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+  SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+  SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+  SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+
+  s_window = SDL_CreateWindow("Bully", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+                              s_panel_w, s_panel_h, SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN);
+  if (!s_window)
+  {
+    debugPrintf("video: window creation failed: %s\n", SDL_GetError());
     return 0;
   }
 
-  eglChooseConfig(display, configAttribs, &eglConfig, 1, &numConfigs);
-  if (numConfigs <= 0)
+  // creates the context and makes it current on this (main) thread
+  s_glctx = SDL_GL_CreateContext(s_window);
+  if (!s_glctx)
   {
-    debugPrintf("EGL: No matching config: %08x\n", eglGetError());
+    debugPrintf("video: GL context creation failed: %s\n", SDL_GetError());
+    SDL_DestroyWindow(s_window);
+    s_window = NULL;
     return 0;
   }
 
-  surface = eglCreateWindowSurface(display, eglConfig, win, NULL);
-  if (!surface)
+  SDL_ShowCursor(SDL_DISABLE);
+
+  g_egl_display = eglGetCurrentDisplay();
+  g_egl_surface = eglGetCurrentSurface(EGL_DRAW);
+  g_egl_context = eglGetCurrentContext();
+
+  if (SDL_GL_SetSwapInterval(1) != 0)
+    debugPrintf("video: could not set swap interval: %s\n", SDL_GetError());
+
+  float scale = video_render_scale();
+  screen_width = s_panel_w;
+  screen_height = s_panel_h;
+  if (scale < 1.0f)
   {
-    debugPrintf("EGL: Could not create surface: %08x\n", eglGetError());
-    return 0;
+    screen_width = ((int)(s_panel_w * scale)) & ~1;
+    screen_height = ((int)(s_panel_h * scale)) & ~1;
+    if (!video_create_fbo())
+    {
+      screen_width = s_panel_w;
+      screen_height = s_panel_h;
+    }
   }
 
-  context = eglCreateContext(display, eglConfig, EGL_NO_CONTEXT, contextAttribs);
-  if (!context)
-  {
-    debugPrintf("EGL: Could not create context: %08x\n", eglGetError());
-    return 0;
-  }
-
-  eglMakeCurrent(display, surface, surface, context);
-  if (eglSwapInterval(display, 1) == EGL_FALSE)
-    debugPrintf("EGL: Could not set swap interval: %08x\n", eglGetError());
-
+  debugPrintf("video: panel %dx%d, game renders %dx%d (scale %.2f, fbo %u)\n",
+              s_panel_w, s_panel_h, screen_width, screen_height, scale, s_fbo);
+  debugPrintf("GL_RENDERER: %s\n", glGetString(GL_RENDERER));
+  debugPrintf("GL_VERSION: %s\n", glGetString(GL_VERSION));
   debugPrintf("GL_EXTENSIONS: %s\n", glGetString(GL_EXTENSIONS));
 
   return 1; // success
+}
+
+// Called on the thread that owns the context (render thread)
+void video_swap(void)
+{
+  GLint draw_fb = 0, read_fb = 0;
+
+  if (s_fbo)
+  {
+    static const GLenum fbo_discard[] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+    static const GLenum win_discard[] = {GL_COLOR, GL_DEPTH, GL_STENCIL};
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fb);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fb);
+    if (scissor)
+      glDisable(GL_SCISSOR_TEST);
+
+    // depth/stencil are not needed past this point; the blit overwrites the whole window
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, s_fbo);
+    glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, fbo_discard);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 3, win_discard);
+    glBlitFramebuffer(0, 0, screen_width, screen_height,
+                      0, 0, s_panel_w, s_panel_h,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    if (scissor)
+      glEnable(GL_SCISSOR_TEST);
+  }
+
+  SDL_GL_SwapWindow(s_window);
+
+  if (s_fbo)
+  {
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fb);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read_fb);
+  }
+}
+
+// SDL tracks the current window per thread; SDL_GL_SwapWindow fails unless the
+// context was made current through SDL, so every make/release goes through here.
+int video_make_current(void)
+{
+  if (SDL_GL_MakeCurrent(s_window, s_glctx) != 0)
+  {
+    debugPrintf("video_make_current: failed: %s\n", SDL_GetError());
+    return 0;
+  }
+  return 1;
+}
+
+void video_release_current(void)
+{
+  SDL_GL_MakeCurrent(s_window, NULL);
+}
+
+// Keep SDL's KMSDRM page-flip logic in sync with the game's swap interval
+EGLBoolean eglSwapInterval_wrapper(EGLDisplay dpy, EGLint interval)
+{
+  (void)dpy;
+  debugPrintf("eglSwapInterval_wrapper: %d\n", interval);
+  return SDL_GL_SetSwapInterval(interval) == 0 ? EGL_TRUE : EGL_FALSE;
+}
+
+// The game's framebuffer 0 is our scaling FBO when render scale < 1.0
+void glBindFramebuffer_wrapper(GLenum target, GLuint framebuffer)
+{
+  glBindFramebuffer(target, framebuffer == 0 ? s_fbo : framebuffer);
 }
 
 void patch_opengl(void)
@@ -120,13 +250,23 @@ void patch_opengl(void)
 
 void deinit_opengl(void)
 {
-  if (display)
+  if (!s_window)
+    return;
+
+  // GL objects (incl. the FBO) go with the context
+  if (s_glctx)
   {
-    eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (context)
-      eglDestroyContext(display, context);
-    if (surface)
-      eglDestroySurface(display, surface);
-    eglTerminate(display);
+    SDL_GL_MakeCurrent(s_window, NULL);
+    SDL_GL_DeleteContext(s_glctx);
+    s_glctx = NULL;
   }
+  SDL_DestroyWindow(s_window);
+  s_window = NULL;
+  s_fbo = s_fbo_color = s_fbo_depth = 0;
+
+  g_egl_display = EGL_NO_DISPLAY;
+  g_egl_surface = EGL_NO_SURFACE;
+  g_egl_context = EGL_NO_CONTEXT;
+
+  SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }

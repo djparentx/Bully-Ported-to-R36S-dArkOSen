@@ -2,6 +2,7 @@
 #define __HOOKS_H__
 
 #include <EGL/egl.h>
+#include <GLES2/gl2.h>
 #include <AL/al.h>
 #include <AL/alc.h>
 
@@ -49,6 +50,13 @@ ALboolean alIsFilterHook(ALuint filter);
 
 // EGL initialization for Switch - must be called before game starts
 int NVEventEGLInit(void);
+
+// SDL2 KMSDRM video (hooks/opengl.c)
+void video_swap(void);
+int video_make_current(void);
+void video_release_current(void);
+EGLBoolean eglSwapInterval_wrapper(EGLDisplay dpy, EGLint interval);
+void glBindFramebuffer_wrapper(GLenum target, GLuint framebuffer);
 
 // EGL globals (initialized by NVEventEGLInit)
 extern EGLDisplay g_egl_display;

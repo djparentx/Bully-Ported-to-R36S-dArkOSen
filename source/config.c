@@ -14,8 +14,6 @@
 #include "config.h"
 
 #define CONFIG_VARS                                                            \
-  CONFIG_VAR_INT(screen_width);                                                \
-  CONFIG_VAR_INT(screen_height);                                               \
   CONFIG_VAR_INT(clarity);                                                     \
   CONFIG_VAR_INT(shadows);                                                     \
   CONFIG_VAR_INT(trilinear_filter);                                            \
@@ -25,9 +23,9 @@
 
 Config config;
 
-// actual screen size that is in use right now
-int screen_width = 960;
-int screen_height = 540;
+// render size reported to the game; set from the panel by NVEventEGLInit()
+int screen_width = 0;
+int screen_height = 0;
 
 static inline void parse_var(const char *name, const char *value) {
 #define CONFIG_VAR_INT(var)                                                    \
@@ -55,8 +53,6 @@ int read_config(const char *file) {
   char line[1024] = {0};
 
   memset(&config, 0, sizeof(Config));
-  config.screen_width = -1; // auto
-  config.screen_height = -1;
   config.clarity = 0; // Low
   config.shadows = 0; // Low
   config.trilinear_filter = 0;

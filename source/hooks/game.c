@@ -1576,16 +1576,13 @@ void ExitAndroidGame(int code) {
 // our known-good EGL display/surface/context directly.
 void OS_ThreadMakeCurrent_hook(void) {
   debugPrintf("OS_ThreadMakeCurrent_hook: acquiring context on thread\n");
-  EGLBoolean ret = eglMakeCurrent(g_egl_display, g_egl_surface, g_egl_surface,
-                                  g_egl_context);
-  if (!ret)
-    debugPrintf("OS_ThreadMakeCurrent_hook: eglMakeCurrent FAILED (err=%x)\n",
-                eglGetError());
+  if (!video_make_current())
+    debugPrintf("OS_ThreadMakeCurrent_hook: make current FAILED\n");
 }
 
 void OS_ThreadUnmakeCurrent_hook(void) {
   debugPrintf("OS_ThreadUnmakeCurrent_hook: releasing context on thread\n");
-  eglMakeCurrent(g_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  video_release_current();
 }
 
 // OS_ScreenSwapBuffers — the original reads EGL display/surface from globals
@@ -1596,7 +1593,7 @@ void OS_ScreenSwapBuffers_hook(void) {
   if (g_swap_count < 5 || (g_swap_count % 300 == 0))
     debugPrintf("OS_ScreenSwapBuffers_hook: swap #%d\n", g_swap_count);
   g_swap_count++;
-  eglSwapBuffers(g_egl_display, g_egl_surface);
+  video_swap();
 }
 extern int diag_get_egl_swap_count(void);
 int diag_get_swap_count(void) {

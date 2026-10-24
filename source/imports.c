@@ -1245,23 +1245,20 @@ static void egl_call_unlock(void)
 EGLBoolean eglMakeCurrent_wrapper(EGLDisplay dpy, EGLSurface draw,
                                   EGLSurface read, EGLContext ctx)
 {
-  EGLBoolean ok;
+  EGLBoolean ok = EGL_TRUE;
 
   ensure_egl_init();
   egl_call_lock();
   if (ctx == EGL_NO_CONTEXT || draw == EGL_NO_SURFACE)
   {
     debugPrintf("eglMakeCurrent_wrapper: RELEASING context on current thread\n");
-    ok = eglMakeCurrent(g_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-    if (ok == EGL_FALSE)
-      debugPrintf("eglMakeCurrent_wrapper: release FAILED err=0x%x\n", eglGetError());
-    egl_call_unlock();
-    return ok;
+    video_release_current();
   }
-  debugPrintf("eglMakeCurrent_wrapper: ACQUIRING context on current thread\n");
-  ok = eglMakeCurrent(g_egl_display, g_egl_surface, g_egl_surface, g_egl_context);
-  if (ok == EGL_FALSE)
-    debugPrintf("eglMakeCurrent_wrapper: acquire FAILED err=0x%x\n", eglGetError());
+  else
+  {
+    debugPrintf("eglMakeCurrent_wrapper: ACQUIRING context on current thread\n");
+    ok = video_make_current() ? EGL_TRUE : EGL_FALSE;
+  }
   egl_call_unlock();
   return ok;
 }
@@ -1325,15 +1322,13 @@ void glShaderSource_wrapper(GLuint shader, GLsizei count, const GLchar *const *s
 
 EGLBoolean eglSwapBuffers_wrapper(EGLDisplay dpy, EGLSurface surface)
 {
-  EGLBoolean ok;
-
   egl_call_lock();
   if (g_egl_swap_count < 5 || (g_egl_swap_count % 300 == 0))
     debugPrintf("eglSwapBuffers_wrapper: swap #%d\n", g_egl_swap_count);
   g_egl_swap_count++;
-  ok = eglSwapBuffers(g_egl_display, g_egl_surface);
+  video_swap();
   egl_call_unlock();
-  return ok;
+  return EGL_TRUE;
 }
 
 int diag_get_egl_swap_count(void)
@@ -1398,6 +1393,10 @@ void *eglGetProcAddress_wrapper(const char *procname)
     return (void *)eglDestroySurface_wrapper;
   if (strcmp(procname, "eglQuerySurface") == 0)
     return (void *)eglQuerySurface_wrapper;
+  if (strcmp(procname, "eglSwapInterval") == 0)
+    return (void *)eglSwapInterval_wrapper;
+  if (strcmp(procname, "glBindFramebuffer") == 0)
+    return (void *)glBindFramebuffer_wrapper;
 
   // Fall through to real eglGetProcAddress for GL extensions etc.
   void *ptr = (void *)eglGetProcAddress(procname);
@@ -2277,7 +2276,7 @@ DynLibFunction dynlib_functions[] = {
     {"eglInitialize", (uintptr_t)&eglInitialize_wrapper},
     {"eglMakeCurrent", (uintptr_t)&eglMakeCurrent_wrapper},
     {"eglSwapBuffers", (uintptr_t)&eglSwapBuffers_wrapper},
-    {"eglSwapInterval", (uintptr_t)&eglSwapInterval},
+    {"eglSwapInterval", (uintptr_t)&eglSwapInterval_wrapper},
 
     {"abort", (uintptr_t)&abort},
     {"exit", (uintptr_t)&exit},
@@ -2306,7 +2305,7 @@ DynLibFunction dynlib_functions[] = {
     {"glAttachShader", (uintptr_t)&glAttachShader},
     {"glBindAttribLocation", (uintptr_t)&glBindAttribLocation},
     {"glBindBuffer", (uintptr_t)&glBindBuffer},
-    {"glBindFramebuffer", (uintptr_t)&glBindFramebuffer},
+    {"glBindFramebuffer", (uintptr_t)&glBindFramebuffer_wrapper},
     {"glBindRenderbuffer", (uintptr_t)&glBindRenderbuffer},
     {"glBindTexture", (uintptr_t)&glBindTexture},
     {"glBlendFunc", (uintptr_t)&glBlendFunc},

@@ -479,22 +479,16 @@ int InitEGLAndGLES2(void)
 int makeCurrent(void)
 {
   // The game calls this from its render thread to acquire the GL context.
-  debugPrintf("makeCurrent: acquiring EGL context on current thread\n");
-  EGLBoolean ret = eglMakeCurrent(g_egl_display, g_egl_surface, g_egl_surface, g_egl_context);
-  if (ret == EGL_FALSE)
-  {
-    debugPrintf("makeCurrent: FAILED! error=0x%x\n", eglGetError());
-    return 0;
-  }
-  return 1;
+  debugPrintf("makeCurrent: acquiring GL context on current thread\n");
+  return video_make_current();
 }
 
 int unMakeCurrent(void)
 {
   // The game calls this to release the GL context from the current thread,
   // allowing another thread (render thread) to claim it.
-  debugPrintf("unMakeCurrent: releasing EGL context from current thread\n");
-  eglMakeCurrent(g_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  debugPrintf("unMakeCurrent: releasing GL context from current thread\n");
+  video_release_current();
   return 1;
 }
 
@@ -1281,7 +1275,7 @@ void jni_start(void)
   // acquire the context via makeCurrent JNI call or eglMakeCurrent import.
   // If main thread holds it, the render thread's eglMakeCurrent will fail.
   debugPrintf("jni_start: releasing EGL context from main thread before surface callbacks\n");
-  eglMakeCurrent(g_egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+  video_release_current();
 
   debugPrintf("jni_start: calling implOnSurfaceCreated...\n");
   saved_implOnSurfaceCreated(fake_env, NULL);

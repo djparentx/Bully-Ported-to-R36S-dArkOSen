@@ -27,8 +27,6 @@ extern int screen_width;
 extern int screen_height;
 
 typedef struct {
-  int screen_width;
-  int screen_height;
   int clarity;
   int shadows;
   int trilinear_filter;
