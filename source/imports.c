@@ -1812,8 +1812,6 @@ static pthread_cond_t *pthread_cond_create_host(void)
   if (!c)
     return NULL;
 
-  *c = PTHREAD_COND_INITIALIZER;
-
   int ret = pthread_cond_init(c, NULL);
   if (ret < 0)
   {

@@ -549,14 +549,15 @@ int cpplib_load(const char *filename)
   cpplib_load_size = CPPLIB_ALIGN(max_vaddr - min_vaddr, 0x1000);
   cpplib_min_vaddr = min_vaddr;
 
-  if (!local_syms || !local_dynstr)
+  // Allocate memory: one RW mapping (zero-filled); text is flipped to R+X after relocation
+  cpplib_base = mmap(NULL, cpplib_load_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (cpplib_base == MAP_FAILED)
   {
-    debugPrintf("cpplib: no symtab/strtab\n");
-    munmap(cpplib_base, cpplib_load_size);
-    cpplib_base = cpplib_virtbase = NULL;
+    cpplib_base = NULL;
     free(file_buf);
-    return -5;
+    return -4;
   }
+  cpplib_virtbase = cpplib_base;
 
   debugPrintf("cpplib: loading %s at %p -> %p (size=%u KB)\n",
               filename, cpplib_base, cpplib_virtbase, (unsigned)(cpplib_load_size / 1024));
