@@ -1,170 +1,113 @@
-# Bully NX
+# Bully: Anniversary Edition for dArkOSen (RK3326)
 
-Nintendo Switch homebrew port/wrapper for the Android 64-bit release of **Bully: Anniversary Edition**.
+A port of the Android release of **Bully: Anniversary Edition** to RK3326 handhelds running dArkOSen (R36S and similar).
 
-This project does not reimplement the game. It loads the original Android native game library, patches the runtime, and runs it inside a minimal Switch-side compatibility layer.
+This project does not reimplement the game. It loads the original Android native game library, patches it at runtime, and runs it on Linux with SDL2, OpenGL ES 3 (Mali-G31) and OpenAL. It is based on bully-NX, the Nintendo Switch port.
 
-This is still a **work in progress** port. It boots and runs, but it is not finished yet and still contains temporary workarounds that need proper cleanup.
+## Important
+
+You need your own **officially obtained** copy of the game:
+
+- `Bully: Anniversary Edition`, Android version **v1.4.311**
+- with the **arm64-v8a** libraries
+
+No game files are included in this repository or its releases. Do not distribute extracted APK contents.
+
+## Installation
+
+1. Copy the release files into your ports folder (`/roms/ports/` or `/roms2/ports/`):
+   ```txt
+   ports/
+     Bully - Anniversary Edition.sh
+     bully/
+       bully
+   ```
+2. Put your APK in `ports/bully/`. Any file name ending in `.apk` works.
+3. Start **Bully - Anniversary Edition** from the Ports menu.
+
+On the first start the port finds the APK and offers to install the game:
+
+- **A** installs, **B** exits.
+- It checks that there's enough free space before it starts.
+- It extracts the game library, `libc++_shared.so`, the `assets/` folder and the banner image into `ports/bully/`.
+- The APK is kept. Delete it yourself afterwards if you want the space back.
+- If the install is interrupted, it starts over on the next launch.
+
+After that, every start goes straight to the game.
+
+## Controls
+
+- Standard gamepad layout, using the handheld's PortMaster controller mapping.
+- **Select + Start** exits the game at any time.
+- Face-button swaps and crouch toggle are available in `config.txt`.
+
+## Settings: `ports/bully/config.txt`
+
+The file is created on the first start and rewritten from its template on every start. Your values are kept, every key is explained in the file, and out-of-range values are clamped.
+
+| Key | Values | Default | What it does |
+|---|---|---|---|
+| `render_scale` | 0.50–1.00 | 0.75 | Fraction of the screen resolution the game renders at, scaled up in one filtered pass. Lower is faster, higher is sharper. |
+| `clarity` | 0 Low, 1 Medium, 2 High | 0 | The game's own quality preset: internal resolution level and post-processing. |
+| `shadows` | 0 Off – 3 High | 0 | Shadow quality. Expensive on this GPU. |
+| `trilinear_filter` | 0 / 1 | 0 | Smoother transitions between texture detail levels. |
+| `disable_mipmaps` | 0 / 1 | 0 | Experimental. Skips the smaller texture copies. |
+| `language` | 0 English, 1 Spanish, 2 French, 3 German, 4 Italian, 5 Japanese, 6 Russian | 0 | Game text language. |
+| `crouch_toggle` | 0 hold / 1 toggle | 0 | How R3 crouch works. |
+| `swap_ab_buttons` | 0 / 1 | 0 | Swaps the bottom and right face buttons. |
+| `swap_xy_buttons` | 0 / 1 | 0 | Swaps the left and top face buttons. |
+| `debug_log` | 0 / 1 | 0 | Detailed tracing in `bully.log`. Only for bug hunting: it slows the game and the log grows fast. |
+
+The game's own menu settings for resolution, effects and shadows are replaced by the `config.txt` values on the next start.
+
+## What the launcher changes while the game runs
+
+Everything below is put back when the game exits, including after a crash:
+
+- CPU governor set to `performance`.
+- GPU pinned at 520 MHz. 600 MHz hangs the GPU under load on these boards.
+- zram swap resized to 768 MB and `vm.swappiness` set to 100, so idle memory moves to compressed swap and the game gets more RAM.
+  - Resizing takes a few seconds before the game appears.
+  - If the size is already 768 MB, nothing is resized.
+
+Override any of these from the environment: `BULLY_GPU_MAX_HZ`, `BULLY_ZRAM_SIZE` (bytes), `BULLY_SWAPPINESS`.
+
+## Memory
+
+These handhelds have 1 GB of RAM shared with the GPU, so the port limits the game's memory use:
+
+- The game's texture budget is capped at 256 MB.
+- Unused textures are released on area and scene changes, and every 30 seconds.
+- Freed memory is handed back to the system every 10 seconds.
+
+If the game is killed (the log ends with `Bully was killed (137)`), it ran out of memory:
+
+- Lower `clarity` or `shadows`.
+- Reboot before playing. Memory left fragmented by earlier sessions makes this more likely.
+
+## Logs
+
+`ports/bully/bully.log` is rewritten on every start. It contains the device and clock settings, display setup, memory events and the exit status. Include it with any bug report.
+
+## Status
+
+Tested on an RG351MP-class device (rotated 1280x720 panel) running dArkOSen. Other RK3326 devices, including the 640x480 R36S, are expected to work but have not been tested yet.
+
+Movies are not played. The game skips them.
+
+## Building
+
+GitHub Actions builds the port on an arm64 runner in a `debian:trixie` container (`.github/workflows/build.yml`). The artifact `bully-aarch64` contains `bully/bully` and the launcher.
+
+To build on an arm64 Debian Trixie machine:
+
+```bash
+sudo apt install build-essential libsdl2-dev libopenal-dev libegl-dev libgles-dev libminizip-dev zlib1g-dev
+make
+```
 
 ## Credits
 
 - `fgsfds` and `Andy Nguyen` for the original wrapper/loader base used by these ports
-- `givethesourceplox` for the Bully AArch64 Switch port work in this repo
-
-## Important
-
-You must use **officially obtained** game files from your own copy of:
-
-- `Bully: Anniversary Edition`
-- Android version `v1.4.311`
-- with `arm64-v8a` libraries
-
-Do not distribute extracted APK contents with this project.
-
-## Requirements
-
-You need a Switch setup that can run homebrew and this port is intended to be launched through title override / full-memory homebrew, not applet mode.
-
-## Installation
-
-Create this folder on your SD card:
-
-```txt
-sdmc:/switch/bully/
-```
-
-From an officially obtained `Bully: Anniversary Edition` `v1.4.311` APK, extract:
-
-- `assets/`
-- `lib/arm64-v8a/libc++_shared.so`
-- `lib/arm64-v8a/libGame.so`
-
-Then place the files like this:
-
-```txt
-sdmc:/switch/bully/
-- bully_nx.nro
-- libc++_shared.so
-- libBully.so
-- config.txt
-- assets/
-  - data_0.zip
-  - data_1.zip
-  - data_2.zip
-  - data_3.zip
-  - data_4.zip
-  - ...
-```
-
-Notes:
-
-- `libGame.so` from the APK must be copied as `libBully.so`
-- the port checks for `assets/data_0.zip` on startup
-- `savegames/` is created automatically on first run
-- `config.txt` is created automatically if missing
-
-## Quick Install Steps
-
-1. Copy the built `.nro` into `sdmc:/switch/bully/`
-2. Copy `libc++_shared.so` into `sdmc:/switch/bully/`
-3. Copy `libGame.so` into `sdmc:/switch/bully/` and rename it to `libBully.so`
-4. Copy the full `assets` folder into `sdmc:/switch/bully/assets/`
-5. Launch through title override / hbmenu with full memory access
-
-## Configuration
-
-The port reads:
-
-```txt
-sdmc:/switch/bully/config.txt
-```
-
-If it does not exist, the port creates one with default values on first boot.
-
-Examples:
-
-```txt
-screen_width 960
-screen_height 540
-clarity 0
-shadows 1
-trilinear_filter 0
-timing_workaround_ms 0
-```
-
-`clarity` maps to the native in-game display effects level:
-
-- `0` = Low
-- `1` = Medium
-- `2` = High
-
-`shadows` controls the native startup shadow setting:
-
-- `0` = Off
-- `1` = Low
-- `2` = Medium
-- `3` = High
-
-`timing_workaround_ms` controls the current compatibility timing workaround used by the port on some consoles.
-
-- `0` = automatic mode
-- `2`, `3`, `4`, `5` = fixed manual override
-
-Automatic mode starts with no added delay and raises the workaround only if startup/render progress appears to stall on that console. If you still want to force a fixed value manually, try `2`, `3`, `4`, or `5`.
-
-Old wrapper-only keys from earlier builds were removed from the generated config because they were not actually wired in this 64-bit port.
-
-## Building
-
-You need:
-
-- `devkitA64`
-- `libnx`
-- `SDL2`
-- `OpenAL`
-- `minizip`
-- `zlib`
-- `zstd`
-- Switch Mesa / Nouveau userspace libraries
-
-Standard build:
-
-```sh
-docker run --rm -it \
-  -v "$(PWD):/project" \
-  --workdir "/project/bully_nx" \
-  devkitpro/devkita64 \
-  sh -lc 'make clean && make -j$(nproc)'
-```
-
-## Troubleshooting
-
-If the port fails very early:
-
-- make sure the APK is really `v1.4.311`
-- make sure the libraries came from `lib/arm64-v8a/`
-- make sure `libGame.so` was renamed to `libBully.so`
-- make sure `assets/data_0.zip` exists in the game folder
-- make sure you are not launching in applet mode
-
-If the game reports missing symbols or immediately fails to load:
-
-- verify you extracted the correct 64-bit Android files
-- verify `libc++_shared.so` is present beside the `.nro`
-
-## Current Status
-
-Known issues / unfinished parts:
-
-- this is still a work-in-progress port
-- there are still some temporary hacks/workarounds in the runtime that should be replaced with cleaner fixes
-- more cleanup and stabilization is still needed overall
-- Xbox layout on button tips
-
-## Legal
-
-This project is not affiliated with Rockstar Games or Take-Two.
-
-The port should be distributed **without** proprietary game binaries or assets. Users must provide their own legally obtained copy of the Android game files.
-
-Unless stated otherwise, the source code in this repository is released under the MIT License. See [LICENSE](https://github.com/givethesourceplox/bully_nx/blob/master/LICENSE).
+- `givethesourceplox` for the Bully AArch64 Switch port (bully-NX) this port is based on
+- `djparentx` for the dArkOSen port

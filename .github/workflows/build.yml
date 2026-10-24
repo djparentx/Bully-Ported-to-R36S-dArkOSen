@@ -30,6 +30,7 @@ jobs:
           mkdir -p dist/bully
           cp bully dist/bully/
           cp "scripts/Bully - Anniversary Edition.sh" dist/
+          cp "instructions.txt" dist/
 
       - uses: actions/upload-artifact@v4
         with:

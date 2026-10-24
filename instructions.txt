@@ -1,61 +1,88 @@
-Bully NX Port
+Bully: Anniversary Edition - dArkOSen Port
 
 Credits
-- AArch64 Bully porting work in this repo by givethesourceplox.
-- Thanks to TheOfficialFloW and PS Vita port contributors for the method and prior groundwork.
+- dArkOSen port by djparentx.
+- Based on bully-NX, the AArch64 Switch port by givethesourceplox.
+- Wrapper/loader base by fgsfds and Andy Nguyen.
+- Thanks to TheOfficialFloW and the PS Vita port contributors for the method
+  and prior groundwork.
 
 Introduction
-This port runs the Android 64-bit version of Bully: Anniversary Edition on Nintendo Switch by loading the original game data and native library from an official Android release.
+This port runs the Android 64-bit version of Bully: Anniversary Edition on
+RK3326 handhelds running dArkOSen (R36S and similar). It loads the original
+native library and game data from an official Android release.
 
 No original game assets are included with this port.
-You must use officially obtained assets from your own copy of Bully: Anniversary Edition APK v1.4.311.
-Patched, modded, cracked/nulled versions are not endorsed and doesn't work with this port
-
-Required Files
-From an officially obtained Bully: Anniversary Edition APK v1.4.311 with arm64-v8a libraries, extract:
-- assets/ folder
-- lib/arm64-v8a/libc++_shared.so
-- lib/arm64-v8a/libGame.so
+You must use your own officially obtained Bully: Anniversary Edition APK
+v1.4.311 with arm64-v8a libraries.
+Patched, modded, cracked or nulled versions are not endorsed and do not work
+with this port.
 
 Installation
-1. Create this folder on your SD card:
-   sdmc:/switch/bully/
+1. Copy the port files into your ports folder (/roms/ports/ or /roms2/ports/):
+   - Bully - Anniversary Edition.sh
+   - bully/bully
 
-2. Copy the port files into that folder:
-   - the .nro build from this project
-   - any optional config.txt you want to ship with it
+2. Copy your APK into the bully folder:
+   ports/bully/your-copy.apk
+   Any file name ending in .apk works.
 
-3. Copy the full assets folder from the APK to:
-   sdmc:/switch/bully/assets/
+3. Start "Bully - Anniversary Edition" from the Ports menu.
 
-4. Copy libc++_shared.so from the APK to:
-   sdmc:/switch/bully/libc++_shared.so
+4. The installer opens on the first start:
+   - A installs, B exits.
+   - It checks for enough free space, then extracts the game library,
+     libc++_shared.so, the assets folder and the banner image.
+   - The APK is kept. Delete it afterwards if you want the space back.
+   - If the install is interrupted, it starts over on the next launch.
 
-5. Copy libGame.so from the APK to this path and rename it:
-   source: lib/arm64-v8a/libGame.so
-   destination: sdmc:/switch/bully/libBully.so
+Layout After Install
+ports/
+- Bully - Anniversary Edition.sh
+- bully/
+  - bully
+  - your-copy.apk
+  - libBully.so          (the APK's lib/arm64-v8a/libGame.so)
+  - libc++_shared.so
+  - banner.png
+  - config.txt           (created on first start)
+  - bully.log            (rewritten on every start)
+  - assets/
+    - data_0.zip
+    - data_1.zip
+    - data_2.zip
+    - data_3.zip
+    - data_4.zip
+    - ...
 
-Expected Layout
-sdmc:/switch/bully/
-- your_port.nro
-- libc++_shared.so
-- libBully.so
-- config.txt
-- assets/
-  - data_0.zip
-  - data_1.zip
-  - data_2.zip
-  - data_3.zip
-  - data_4.zip
-  - ...
+Controls
+- Standard gamepad layout, using the handheld's PortMaster controller mapping.
+- Select + Start exits the game at any time.
+
+Settings
+All settings are in ports/bully/config.txt. Every key is explained in the
+file itself. The game's own menu settings for resolution, effects and shadows
+are replaced by the config.txt values on the next start.
+- render_scale   0.50-1.00   render resolution (lower is faster)
+- clarity        0-2         the game's quality preset
+- shadows        0-3         shadow quality (expensive on this GPU)
+- language       0-6         game text language
+- crouch_toggle, swap_ab_buttons, swap_xy_buttons   control options
+- debug_log      0/1         detailed tracing, for bug reports only
 
 Notes
-- The game directory must contain assets/data_0.zip or the port will fail the startup data check.
-- savegames/ folder its not working yet, save files are now placed in the same folder of the NRO
-- This port is intended for the 64-bit Android build. Use the official Bully: Anniversary Edition APK v1.4.311 with arm64-v8a content.
+- The game folder must contain assets/data_0.zip, or the startup data check
+  fails.
+- Save files are stored inside ports/bully/.
+- While the game runs, the launcher sets the CPU to performance, pins the GPU
+  at 520 MHz, and sets zram to 768 MB with swappiness 100. Everything is put
+  back on exit.
+- If the game closes suddenly and bully.log ends with
+  "Bully was killed (137)", it ran out of memory. Lower clarity or shadows,
+  and reboot before playing.
+- Movies are not played. The game skips them.
 - Do not distribute the extracted APK contents with the port.
-- Shadows its resource intensive if you want to enable change to 1 at config.txt
 
 Legal
 Use only assets and binaries from an officially obtained copy of the game.
-This port should be distributed without proprietary game files.
+This port must be distributed without proprietary game files.
