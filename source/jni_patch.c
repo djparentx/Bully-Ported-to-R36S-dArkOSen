@@ -739,7 +739,7 @@ void CallVoidMethodV(void *env, void *obj, int methodID, va_list args)
     debugPrintf("JNI rockstarLogBreadcrumb(%s, %s)\n",
                 cat ? cat : "(null)", msg ? msg : "(null)");
     if (cat && msg && !strcmp(cat, "transition") && strstr(msg, "player area"))
-      memory_area_changed();
+      memory_cleanup("area change");
     return;
   }
   case HTTP_HEAD:

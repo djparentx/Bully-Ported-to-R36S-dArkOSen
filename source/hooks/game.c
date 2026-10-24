@@ -1877,22 +1877,47 @@ float WarGamepad_GetGamepadAxis(int padnum, int axis) {
 }
 
 // Hook game's own debug output so we see what the engine prints
-void OS_DebugOutFmt_hook(const char *fmt, ...) {
+// Engine messages: formatted only when logged (debug_log 1) or when they are
+// a DeleteScene, which starts a scene swap: unused memory is freed before the
+// next scene loads
+static void engine_message(const char *kind, const char *fmt, va_list ap)
+{
+  const char *probe = fmt;
   char buf[1024];
+  int scene;
+
+  if (!fmt)
+    return;
+  if (!strcmp(fmt, "%s"))
+  {
+    va_list cp;
+
+    va_copy(cp, ap);
+    probe = va_arg(cp, const char *);
+    va_end(cp);
+  }
+  scene = probe && !strncmp(probe, "DeleteScene", 11);
+  if (!scene && !config.debug_log)
+    return;
+
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  debugPrintf("%s: %s\n", kind, buf);
+  if (scene)
+    memory_cleanup(buf);
+}
+
+void OS_DebugOutFmt_hook(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, ap);
+  engine_message("OS_DebugOutFmt", fmt, ap);
   va_end(ap);
-  debugPrintf("OS_DebugOutFmt: %s\n", buf);
 }
 
 void OS_DebugOutFmtForce_hook(const char *fmt, ...) {
-  char buf[1024];
   va_list ap;
   va_start(ap, fmt);
-  vsnprintf(buf, sizeof(buf), fmt, ap);
+  engine_message("OS_DebugOutFmtForce", fmt, ap);
   va_end(ap);
-  debugPrintf("OS_DebugOutFmtForce: %s\n", buf);
 }
 
 void OS_DebugOut_hook(const char *msg) {
@@ -1989,14 +2014,14 @@ static void memory_tidy_textures(void)
     *s_tidy_texture_memory = 1;
 }
 
-// called from the rockstarLogBreadcrumb JNI handler on area changes
-void memory_area_changed(void)
+// called on area changes (rockstarLogBreadcrumb) and scene deletes (DeleteScene)
+void memory_cleanup(const char *why)
 {
   long kb = vmrss_kb();
 
   memory_tidy_textures();
   malloc_trim(0);
-  logPrintf("memory: area change, VmRSS %ld kB, textures tidied, heap trimmed\n", kb);
+  logPrintf("memory: %s, VmRSS %ld kB, textures tidied, heap trimmed\n", why, kb);
 }
 
 static void *memory_thread(void *arg)

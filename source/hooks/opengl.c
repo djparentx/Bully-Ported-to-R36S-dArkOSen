@@ -348,6 +348,9 @@ void video_draw_tex(unsigned int tex, float x, float y, float w, float h,
 
 void video_present(void)
 {
+  // a frame presented once (installer, splash) must be finished before the
+  // swap: on rotated units SDL's RGA rotation copies the buffer right away
+  glFinish();
   SDL_GL_SwapWindow(s_window);
 }
 
