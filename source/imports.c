@@ -1434,18 +1434,19 @@ int ANativeWindow_setBuffersGeometry_wrapper(void *window, int width, int height
   return 0; // success
 }
 
-// Emulated TLS (__emutls) - GCC ABI for thread_local variables.
-// Control block layout (GCC ABI): { uint32 size, uint32 align, uint64 index, void *templ }
-// Each thread gets a dynamically-growing array of TLS variable pointers,
-// indexed by the control block's pre-assigned index field.
+// Emulated TLS (__emutls) for the game's thread_local variables (NDK clang /
+// compiler-rt ABI). Control block on 64-bit:
+//   { size_t size; size_t align; uintptr_t index; void *templ }
+// index 0 = not assigned yet; each assigned index is a slot in a per-thread
+// array, and each slot holds that thread's copy of the variable.
 #include <pthread.h>
 
 typedef struct
 {
-  unsigned int size;  // offset 0: size of the TLS variable
-  unsigned int align; // offset 4: alignment (0 = default)
-  uintptr_t index;    // offset 8: 1-based index into per-thread array
-  void *templ;        // offset 16: initial value template (NULL = zero-init)
+  size_t size;     // offset 0:  size of the variable
+  size_t align;    // offset 8:  its alignment
+  uintptr_t index; // offset 16: 1-based slot index, 0 until first use
+  void *templ;     // offset 24: initial value (NULL = zero-filled)
 } __emutls_control;
 
 typedef struct
@@ -1474,6 +1475,9 @@ static void emutls_thread_destructor(void *ptr)
 static void *__emutls_get_address_stub(void *control_raw)
 {
   __emutls_control *ctrl = (__emutls_control *)control_raw;
+  emutls_thread_array *arr;
+  uintptr_t index;
+  void *ptr;
 
   // Create the global pthread key on first call
   if (!emutls_key_created)
@@ -1487,8 +1491,8 @@ static void *__emutls_get_address_stub(void *control_raw)
     pthread_mutex_unlock(&emutls_mutex);
   }
 
-  // Assign index if not yet set (should already be set in the binary)
-  uintptr_t index = ctrl->index;
+  // Assign this variable's slot on first use (index 0 = not assigned yet)
+  index = __atomic_load_n(&ctrl->index, __ATOMIC_ACQUIRE);
   if (index == 0)
   {
     pthread_mutex_lock(&emutls_mutex);
@@ -1496,28 +1500,21 @@ static void *__emutls_get_address_stub(void *control_raw)
     if (index == 0)
     {
       index = ++emutls_max_index;
-      ctrl->index = index;
+      __atomic_store_n(&ctrl->index, index, __ATOMIC_RELEASE);
     }
-    pthread_mutex_unlock(&emutls_mutex);
-  }
-  if (index > emutls_max_index)
-  {
-    pthread_mutex_lock(&emutls_mutex);
-    if (index > emutls_max_index)
-      emutls_max_index = index;
     pthread_mutex_unlock(&emutls_mutex);
   }
 
-  // Get or create this thread's TLS array
-  emutls_thread_array *arr = (emutls_thread_array *)pthread_getspecific(emutls_pthread_key);
+  // This thread's slot array, grown to cover the index
+  arr = (emutls_thread_array *)pthread_getspecific(emutls_pthread_key);
   if (!arr || arr->capacity < index)
   {
     uintptr_t new_cap = index + 32;
+    void **new_slots;
+
     if (!arr)
-    {
       arr = (emutls_thread_array *)calloc(1, sizeof(emutls_thread_array));
-    }
-    void **new_slots = (void **)calloc(new_cap, sizeof(void *));
+    new_slots = (void **)calloc(new_cap, sizeof(void *));
     if (arr->slots)
     {
       memcpy(new_slots, arr->slots, arr->capacity * sizeof(void *));
@@ -1528,15 +1525,24 @@ static void *__emutls_get_address_stub(void *control_raw)
     pthread_setspecific(emutls_pthread_key, arr);
   }
 
-  // Get or allocate the TLS variable (index is 1-based)
-  void *ptr = arr->slots[index - 1];
+  // This thread's copy of the variable: its real size and alignment,
+  // zero-filled, then the initial value if the variable has one
+  ptr = arr->slots[index - 1];
   if (!ptr)
   {
-    size_t size = ctrl->size;
-    if (size == 0)
-      size = sizeof(void *);
-    ptr = calloc(1, size);
-    if (ctrl->templ && size > 0)
+    size_t size = ctrl->size ? ctrl->size : sizeof(void *);
+
+    if (ctrl->align > 16)
+    {
+      ptr = memalign(ctrl->align, size);
+      if (ptr)
+        memset(ptr, 0, size);
+    }
+    else
+    {
+      ptr = calloc(1, size);
+    }
+    if (ptr && ctrl->templ)
       memcpy(ptr, ctrl->templ, size);
     arr->slots[index - 1] = ptr;
   }
