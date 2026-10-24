@@ -20,6 +20,18 @@
 static pthread_mutex_t s_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t s_main_thread;
 static int s_main_thread_set = 0;
+static uint64_t s_log_start_ns;
+
+// clock for the log's time column: starts before main()
+__attribute__((constructor)) static void log_clock_start(void)
+{
+  s_log_start_ns = mono_ns();
+}
+
+static double log_seconds(void)
+{
+  return (double)(mono_ns() - s_log_start_ns) / 1e9;
+}
 
 void debugPrintf_setMainThread(void)
 {
@@ -41,7 +53,7 @@ int debugPrintf(const char *text, ...)
     tag = pthread_equal(pthread_self(), s_main_thread) ? "M" : "G";
 
   pthread_mutex_lock(&s_log_mutex);
-  printf("[%s] ", tag);
+  printf("[%7.2f] [%s] ", log_seconds(), tag);
   va_start(list, text);
   vprintf(text, list);
   va_end(list);
@@ -56,6 +68,7 @@ int logPrintf(const char *text, ...)
   va_list list;
 
   pthread_mutex_lock(&s_log_mutex);
+  printf("[%7.2f] ", log_seconds());
   va_start(list, text);
   vprintf(text, list);
   va_end(list);
