@@ -13,16 +13,19 @@
 extern "C" {
 #endif
 
-// after so_finalize(): takes over the game's DXT upload (GOT patch)
-void texconv_patch(void *text_virtbase);
+// before the game runs: starts the encoder threads
+void texconv_init(void);
 // one log line: textures converted so far, their size and the time spent
 void texconv_log(void);
 
 // import wrappers (imports.c dynlib table)
+const GLubyte *texconv_glGetString(GLenum name);
+void texconv_glGetIntegerv(GLenum pname, GLint *data);
 void texconv_glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height);
-void texconv_glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
-                             GLsizei height, GLenum format, GLenum type, const void *pixels);
-void texconv_glDeleteTextures(GLsizei n, const GLuint *textures);
+void texconv_glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width,
+                                    GLsizei height, GLint border, GLsizei size, const void *data);
+void texconv_glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
+                                       GLsizei height, GLenum format, GLsizei size, const void *data);
 
 #ifdef __cplusplus
 }

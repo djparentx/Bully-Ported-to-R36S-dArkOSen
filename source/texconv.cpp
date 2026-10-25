@@ -1,18 +1,17 @@
 /* texconv.cpp -- DXT (S3TC) game textures converted to ETC2 for Mali
  *
- * Mali has no S3TC, so the game decodes every DXT texture on the CPU into
- * 16-bit storage: DXT1 -> RGB565 (2 bytes/pixel instead of 0.5) and
- * DXT3/DXT5 -> RGBA4444 (2 bytes/pixel instead of 1, and 4-bit colour).
- * Here each DXT texture is decoded (bcdec) and re-encoded to ETC2 (etcpak),
- * which Mali supports natively: DXT1 -> ETC2 RGB (0.5 bytes/pixel),
- * DXT3/DXT5 -> ETC2 RGBA8 (1 byte/pixel).
+ * Mali has no S3TC. Without it the game decodes every DXT texture on the CPU
+ * (Texture2DES::CreateCompatibleImage) into 16-bit textures: DXT1 -> RGB565
+ * (2 bytes/pixel instead of 0.5), DXT3/DXT5 -> RGBA4444 (2 bytes/pixel
+ * instead of 1, and 4-bit colour).
  *
- * The game's ES3 path (Texture2DES3::InitWithData) does:
- *   glTexStorage2D(RGB565 or RGBA4)          for a DXT texture
- *   wrapped_glCompressedTexImage2D(...) * N  one per mip level, sub-image
- * Native RGB565/RGBA4444 textures use the same storage formats but are filled
- * with glTexSubImage2D, so the storage call is held back until the first
- * upload shows which kind of texture it is.
+ * Here S3TC is reported as supported (GL_EXTENSIONS and the compressed format
+ * list), so the game uploads its DXT data as it would on a GPU with S3TC:
+ *   glTexStorage2D(DXT format)               -> ETC2 storage
+ *   glCompressedTexSubImage2D(DXT data) * N  -> decoded (bcdec), re-encoded
+ *   glCompressedTexImage2D(DXT data)            to ETC2 (etcpak), uploaded
+ * DXT1 -> ETC2 RGB (0.5 bytes/pixel), DXT3/DXT5 -> ETC2 RGBA8 (1 byte/pixel).
+ * DXT1 is treated as opaque, as the game does with S3TC (GL_COMPRESSED_RGB_S3TC_DXT1).
  *
  * All calls come from the thread that holds the GL context, so the state here
  * needs no lock. Large textures are encoded on all four cores: the calling
@@ -37,42 +36,15 @@ extern "C" {
 #include "bcdec.h"
 #include "etcpak/ProcessRGB.hpp"
 
-// libBully.so (APK v1.4.311): GOT slot and address of
-// wrapped_glCompressedTexImage2D(unsigned, int, unsigned, int, int, int, int, const void *, bool, bool)
-#define WRAPPED_COMPRESSED_GOT 0x1226f60
-#define WRAPPED_COMPRESSED_FN 0x963dc8
-
 #define DXT1 0x83F0 // GL_COMPRESSED_RGB_S3TC_DXT1_EXT
 #define DXT1A 0x83F1 // GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
 #define DXT3 0x83F2 // GL_COMPRESSED_RGBA_S3TC_DXT3_EXT
 #define DXT5 0x83F3 // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT
+#define S3TC_EXTENSION "GL_EXT_texture_compression_s3tc"
 
-#define MAX_TRACKED (1u << 20) // texture names followed (1 byte each)
 #define WORKERS 3              // plus the calling thread
 #define SPLIT_MIN_ROWS 16      // block rows below which one thread encodes
 #define BUFFER_KEEP (4u << 20) // scratch kept between textures (a 1024x1024 level)
-
-enum
-{
-  TRACK_NONE = 0,
-  TRACK_ETC2_RGB = 1,
-  TRACK_ETC2_RGBA = 2,
-};
-
-typedef void (*WrappedFn)(GLenum target, GLint level, GLenum format, GLsizei width, GLsizei height,
-                          GLint border, GLsizei size, const void *data, bool sub, bool uncompressed);
-
-static WrappedFn s_wrapped_real = NULL;
-static uint8_t *s_tracked = NULL; // per texture name: TRACK_*
-
-// a 16-bit storage call held back until the first upload
-static struct
-{
-  int valid;
-  GLuint tex;
-  GLsizei levels, width, height;
-  GLenum internalformat;
-} s_pending;
 
 static uint32_t *s_pixels = NULL; // decoded block rows (BGRA for etcpak)
 static size_t s_pixels_cap = 0;
@@ -83,29 +55,6 @@ static unsigned s_textures = 0;
 static unsigned s_failed = 0;
 static uint64_t s_bytes = 0;
 static uint64_t s_ns = 0;
-
-static GLuint bound_texture(void)
-{
-  GLint tex = 0;
-  glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex);
-  return (GLuint)tex;
-}
-
-// the held-back storage call goes through unchanged (a native 16-bit texture)
-static void commit_pending(void)
-{
-  GLuint cur;
-
-  if (!s_pending.valid)
-    return;
-  s_pending.valid = 0;
-  cur = bound_texture();
-  if (cur != s_pending.tex)
-    glBindTexture(GL_TEXTURE_2D, s_pending.tex);
-  glTexStorage2D(GL_TEXTURE_2D, s_pending.levels, s_pending.internalformat, s_pending.width, s_pending.height);
-  if (cur != s_pending.tex)
-    glBindTexture(GL_TEXTURE_2D, cur);
-}
 
 static int grow(void **buf, size_t *cap, size_t need)
 {
@@ -288,8 +237,8 @@ static size_t transcode(int kind, int rgba, GLsizei width, GLsizei height, GLsiz
     }
   }
 
-  // bcdec writes R,G,B,A bytes; etcpak reads B,G,R,A. DXT1 is opaque, as in
-  // the game's own RGB565 path.
+  // bcdec writes R,G,B,A bytes; etcpak reads B,G,R,A. DXT1 is opaque
+  // (GL_COMPRESSED_RGB_S3TC_DXT1 semantics).
   for (i = 0; i < blocks * 16; i++)
   {
     uint32_t v = s_pixels[i];
@@ -304,54 +253,25 @@ static size_t transcode(int kind, int rgba, GLsizei width, GLsizei height, GLsiz
   return blocks * (rgba ? 16 : 8);
 }
 
-static void wrapped_hook(GLenum target, GLint level, GLenum format, GLsizei width, GLsizei height,
-                         GLint border, GLsizei size, const void *data, bool sub, bool uncompressed)
+static GLenum etc2_format(int kind)
 {
-  const int kind = dxt_kind(format);
-  uint64_t t0;
-  size_t out;
-  GLuint tex;
-  int rgba;
+  return kind == 1 ? GL_COMPRESSED_RGB8_ETC2 : GL_COMPRESSED_RGBA8_ETC2_EAC;
+}
 
-  if (!kind || target != GL_TEXTURE_2D || !data)
-  {
-    commit_pending();
-    s_wrapped_real(target, level, format, width, height, border, size, data, sub, uncompressed);
-    return;
-  }
+static void upload_level(int full, GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                         GLsizei width, GLsizei height, int kind, GLsizei size, const void *data)
+{
+  const uint64_t t0 = mono_ns();
+  const int rgba = kind != 1;
+  const size_t out = transcode(kind, rgba, width, height, size, data);
 
-  tex = bound_texture();
-  if (s_pending.valid && s_pending.tex == tex)
-  {
-    // the 16-bit storage this DXT texture asked for becomes ETC2 instead
-    const int to_rgba = s_pending.internalformat == GL_RGBA4;
-
-    s_pending.valid = 0;
-    glTexStorage2D(GL_TEXTURE_2D, s_pending.levels,
-                   to_rgba ? GL_COMPRESSED_RGBA8_ETC2_EAC : GL_COMPRESSED_RGB8_ETC2,
-                   s_pending.width, s_pending.height);
-    s_tracked[tex] = to_rgba ? TRACK_ETC2_RGBA : TRACK_ETC2_RGB;
-    s_textures++;
-  }
-  else
-  {
-    commit_pending();
-  }
-
-  if (tex == 0 || tex >= MAX_TRACKED || s_tracked[tex] == TRACK_NONE)
-  {
-    s_wrapped_real(target, level, format, width, height, border, size, data, sub, uncompressed);
-    return;
-  }
-
-  rgba = s_tracked[tex] == TRACK_ETC2_RGBA;
-  t0 = mono_ns();
-  out = transcode(kind, rgba, width, height, size, data);
   if (out)
   {
-    glCompressedTexSubImage2D(GL_TEXTURE_2D, level, 0, 0, width, height,
-                              rgba ? GL_COMPRESSED_RGBA8_ETC2_EAC : GL_COMPRESSED_RGB8_ETC2,
-                              (GLsizei)out, s_blocks);
+    if (full)
+      glCompressedTexImage2D(target, level, etc2_format(kind), width, height, 0, (GLsizei)out, s_blocks);
+    else
+      glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, etc2_format(kind),
+                                (GLsizei)out, s_blocks);
     s_bytes += out;
   }
   else
@@ -371,78 +291,101 @@ static void wrapped_hook(GLenum target, GLint level, GLenum format, GLsizei widt
   }
 }
 
+// --- import wrappers -------------------------------------------------------------
+
+// S3TC is reported as supported, so the game skips its own CPU decode and
+// uploads the DXT data, which the wrappers below turn into ETC2
+extern "C" const GLubyte *texconv_glGetString(GLenum name)
+{
+  static char *s_extensions = NULL;
+  const char *real = (const char *)glGetString(name);
+
+  if (name != GL_EXTENSIONS || !real)
+    return (const GLubyte *)real;
+  if (!s_extensions)
+  {
+    const size_t len = strlen(real);
+    char *ext = (char *)malloc(len + sizeof(" " S3TC_EXTENSION));
+
+    if (!ext)
+      return (const GLubyte *)real;
+    memcpy(ext, real, len);
+    memcpy(ext + len, " " S3TC_EXTENSION, sizeof(" " S3TC_EXTENSION));
+    s_extensions = ext;
+  }
+  return (const GLubyte *)s_extensions;
+}
+
+extern "C" void texconv_glGetIntegerv(GLenum pname, GLint *data)
+{
+  if (pname == GL_COMPRESSED_TEXTURE_FORMATS && data)
+  {
+    GLint n = 0;
+
+    glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, &n);
+    glGetIntegerv(pname, data);
+    data[n + 0] = DXT1;
+    data[n + 1] = DXT1A;
+    data[n + 2] = DXT3;
+    data[n + 3] = DXT5;
+    return;
+  }
+  glGetIntegerv(pname, data);
+  if (pname == GL_NUM_COMPRESSED_TEXTURE_FORMATS && data)
+    data[0] += 4;
+}
+
 extern "C" void texconv_glTexStorage2D(GLenum target, GLsizei levels, GLenum internalformat,
                                        GLsizei width, GLsizei height)
 {
-  commit_pending();
-  if (s_tracked && target == GL_TEXTURE_2D && levels > 0 &&
-      (internalformat == GL_RGB565 || internalformat == GL_RGBA4))
-  {
-    GLuint tex = bound_texture();
+  const int kind = dxt_kind(internalformat);
 
-    if (tex != 0 && tex < MAX_TRACKED)
-    {
-      s_tracked[tex] = TRACK_NONE;
-      s_pending.valid = 1;
-      s_pending.tex = tex;
-      s_pending.levels = levels;
-      s_pending.internalformat = internalformat;
-      s_pending.width = width;
-      s_pending.height = height;
-      return;
-    }
+  if (kind)
+  {
+    internalformat = etc2_format(kind);
+    s_textures++;
   }
   glTexStorage2D(target, levels, internalformat, width, height);
 }
 
-extern "C" void texconv_glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
-                                        GLsizei width, GLsizei height, GLenum format, GLenum type,
-                                        const void *pixels)
+extern "C" void texconv_glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
+                                               GLsizei width, GLsizei height, GLint border,
+                                               GLsizei size, const void *data)
 {
-  commit_pending();
-  glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
-}
+  const int kind = dxt_kind(internalformat);
 
-extern "C" void texconv_glDeleteTextures(GLsizei n, const GLuint *textures)
-{
-  if (s_tracked && textures)
+  if (!kind || !data)
   {
-    for (GLsizei i = 0; i < n; i++)
-    {
-      if (s_pending.valid && textures[i] == s_pending.tex)
-        s_pending.valid = 0;
-      if (textures[i] < MAX_TRACKED)
-        s_tracked[textures[i]] = TRACK_NONE;
-    }
-  }
-  glDeleteTextures(n, textures);
-}
-
-extern "C" void texconv_patch(void *text_virtbase)
-{
-  uintptr_t *slot = (uintptr_t *)((uintptr_t)text_virtbase + WRAPPED_COMPRESSED_GOT);
-
-  if (*slot != (uintptr_t)text_virtbase + WRAPPED_COMPRESSED_FN)
-  {
-    logPrintf("textures: DXT to ETC2 off (unexpected libBully.so)\n");
+    glCompressedTexImage2D(target, level, internalformat, width, height, border, size, data);
     return;
   }
-  s_tracked = (uint8_t *)calloc(MAX_TRACKED, 1);
-  if (!s_tracked)
+  if (level == 0)
+    s_textures++;
+  upload_level(1, target, level, 0, 0, width, height, kind, size, data);
+}
+
+extern "C" void texconv_glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                                  GLsizei width, GLsizei height, GLenum format,
+                                                  GLsizei size, const void *data)
+{
+  const int kind = dxt_kind(format);
+
+  if (!kind || !data)
   {
-    logPrintf("textures: DXT to ETC2 off (out of memory)\n");
+    glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, size, data);
     return;
   }
+  upload_level(0, target, level, xoffset, yoffset, width, height, kind, size, data);
+}
+
+extern "C" void texconv_init(void)
+{
   pool_start();
-  s_wrapped_real = (WrappedFn)*slot;
-  *slot = (uintptr_t)wrapped_hook;
   logPrintf("textures: DXT to ETC2 conversion on (%d threads)\n", s_pool_ready ? WORKERS + 1 : 1);
 }
 
 extern "C" void texconv_log(void)
 {
-  if (!s_tracked)
-    return;
   logPrintf("textures: %u converted to ETC2, %.1f MB uploaded, %.1f s converting, %u failed\n",
             s_textures, (double)s_bytes / (1024.0 * 1024.0), (double)s_ns / 1e9, s_failed);
 }

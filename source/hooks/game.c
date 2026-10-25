@@ -2111,7 +2111,7 @@ void patch_game_post_finalize(void) {
   debugPrintf("GOT-patched OrigPretick: real=%p hook=%p\n",
               (void *)OrigPretick_real, (void *)OrigPretick_hook);
   memory_patch_data();
-  texconv_patch(text_virtbase);
+  texconv_init();
 }
 
 void patch_game(void) {
