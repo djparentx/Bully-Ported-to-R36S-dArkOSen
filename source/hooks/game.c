@@ -25,6 +25,7 @@
 #include "../jni_patch.h"
 #include "../so_util.h"
 #include "../util.h"
+#include "../texconv.h"
 
 extern EGLDisplay g_egl_display;
 extern EGLSurface g_egl_surface;
@@ -2022,6 +2023,7 @@ void memory_cleanup(const char *why)
   memory_tidy_textures();
   malloc_trim(0);
   logPrintf("memory: %s, VmRSS %ld kB, textures tidied, heap trimmed\n", why, kb);
+  texconv_log();
 }
 
 static void *memory_thread(void *arg)
@@ -2109,6 +2111,7 @@ void patch_game_post_finalize(void) {
   debugPrintf("GOT-patched OrigPretick: real=%p hook=%p\n",
               (void *)OrigPretick_real, (void *)OrigPretick_hook);
   memory_patch_data();
+  texconv_patch(text_virtbase);
 }
 
 void patch_game(void) {

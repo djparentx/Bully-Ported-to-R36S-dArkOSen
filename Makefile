@@ -1,6 +1,6 @@
 TARGET   := bully
 BUILD    := build
-SRCDIRS  := source source/hooks
+SRCDIRS  := source source/hooks source/etcpak
 
 CFILES   := $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.c))
 CPPFILES := $(foreach d,$(SRCDIRS),$(wildcard $(d)/*.cpp))
@@ -29,6 +29,9 @@ $(BUILD)/%.c.o: %.c
 $(BUILD)/%.cpp.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+# third-party texture encoder: its own warnings are upstream's
+$(BUILD)/source/etcpak/%.cpp.o: CXXFLAGS += -w
 
 clean:
 	rm -rf $(BUILD) $(TARGET)

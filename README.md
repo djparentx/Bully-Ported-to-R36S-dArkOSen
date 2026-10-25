@@ -87,6 +87,7 @@ These handhelds have 1 GB of RAM shared with the GPU, so the port limits the gam
 - The game's texture budget is capped at 256 MB.
 - Unused textures are released on area and scene changes, and every 30 seconds.
 - Freed memory is handed back to the system every 10 seconds.
+- DXT textures are converted to ETC2, which the Mali GPU supports natively. The game would otherwise store them uncompressed at up to 4x the memory.
 
 If the game is killed (the log ends with `Bully was killed (137)`), it ran out of memory:
 
@@ -123,3 +124,4 @@ make
 - `fgsfds` and `Andy Nguyen` for the original wrapper/loader base used by these ports
 - `givethesourceplox` for the Bully AArch64 Switch port (bully-NX) this port is based on
 - `djparentx` for the dArkOSen port
+- [etcpak](https://github.com/wolfpld/etcpak) by Bartosz Taudul (BSD licence) and [bcdec](https://github.com/iOrange/bcdec) by Sergii Kudlai (MIT licence), vendored for the DXT to ETC2 texture conversion

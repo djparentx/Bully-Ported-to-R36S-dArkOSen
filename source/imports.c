@@ -42,6 +42,7 @@
 #include "util.h"
 #include "hooks.h"
 #include "zip_fs.h"
+#include "texconv.h"
 
 extern uintptr_t __cxa_atexit;
 
@@ -2394,7 +2395,7 @@ DynLibFunction dynlib_functions[] = {
     {"glDeleteProgram", (uintptr_t)&glDeleteProgram},
     {"glDeleteRenderbuffers", (uintptr_t)&glDeleteRenderbuffers},
     {"glDeleteShader", (uintptr_t)&glDeleteShader},
-    {"glDeleteTextures", (uintptr_t)&glDeleteTextures},
+    {"glDeleteTextures", (uintptr_t)&texconv_glDeleteTextures},
     {"glDepthFunc", (uintptr_t)&glDepthFunc},
     {"glDepthMask", (uintptr_t)&glDepthMask},
     {"glDepthRangef", (uintptr_t)&glDepthRangef},
@@ -2457,8 +2458,8 @@ DynLibFunction dynlib_functions[] = {
     {"glStencilFunc", (uintptr_t)&glStencilFunc},
     {"glStencilMask", (uintptr_t)&glStencilMask},
     {"glStencilOp", (uintptr_t)&glStencilOp},
-    {"glTexStorage2D", (uintptr_t)&glTexStorage2D},
-    {"glTexSubImage2D", (uintptr_t)&glTexSubImage2D},
+    {"glTexStorage2D", (uintptr_t)&texconv_glTexStorage2D},
+    {"glTexSubImage2D", (uintptr_t)&texconv_glTexSubImage2D},
     {"glCompressedTexSubImage2D", (uintptr_t)&glCompressedTexSubImage2D},
     {"glDrawArrays", (uintptr_t)&glDrawArrays_wrapper},
     {"glCheckFramebufferStatus", (uintptr_t)&glCheckFramebufferStatus},
