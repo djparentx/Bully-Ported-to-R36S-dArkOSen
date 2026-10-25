@@ -148,7 +148,6 @@ static void BullySettings_ApplyConfig(void *this_ptr)
 {
   BullySettingsConfigLayout *settings = (BullySettingsConfigLayout *)this_ptr;
   int clarity;
-  int native_resolution;
   int shadows;
   int shadow_profile;
 
@@ -160,7 +159,6 @@ static void BullySettings_ApplyConfig(void *this_ptr)
     clarity = 0;
   if (clarity > 2)
     clarity = 2;
-  native_resolution = 2 - clarity;
 
   shadows = config.shadows;
   if (shadows < 0)
@@ -172,10 +170,10 @@ static void BullySettings_ApplyConfig(void *this_ptr)
   }
   shadow_profile = shadows > 0 ? shadows + 1 : 0;
 
-  // Native ResolutionSetting is ordered High/Med/Low in this build, while the
-  // port config is exposed as Low/Medium/High.
-  settings->resolution_profile = native_resolution;
-  settings->resolution_setting = native_resolution;
+  // ResolutionSetting and its profile are Low=0, Medium=1, High=2
+  // (__type_ResolutionSetting), the same order as clarity
+  settings->resolution_profile = clarity;
+  settings->resolution_setting = clarity;
   // Native profile shadows use Off=0, Low=2, Medium=3, High=4.
   settings->shadow_profile = shadow_profile;
   settings->effects_level = clarity + 1;
