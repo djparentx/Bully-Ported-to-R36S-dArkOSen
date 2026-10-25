@@ -22,7 +22,7 @@ int screen_height = 0;
 
 static void config_defaults(void)
 {
-  config.render_scale = 0.90f;
+  config.render_scale = 1.00f;
   config.clarity = 2;
   config.shadows = 0;
   config.trilinear_filter = 1;
@@ -30,6 +30,7 @@ static void config_defaults(void)
   config.crouch_toggle = 0;
   config.swap_ab_buttons = 0;
   config.swap_xy_buttons = 0;
+  config.volume = 2.00f;
   config.debug_log = 0;
 }
 
@@ -53,6 +54,7 @@ static void config_clamp(void)
   config.crouch_toggle = clamp_int(config.crouch_toggle, 0, 1);
   config.swap_ab_buttons = clamp_int(config.swap_ab_buttons, 0, 1);
   config.swap_xy_buttons = clamp_int(config.swap_xy_buttons, 0, 1);
+  config.volume = clamp_float(config.volume, 0.50f, 4.00f);
   config.debug_log = clamp_int(config.debug_log, 0, 1);
 }
 
@@ -74,6 +76,8 @@ static void parse_var(const char *name, const char *value)
     config.swap_ab_buttons = atoi(value);
   else if (!strcmp(name, "swap_xy_buttons"))
     config.swap_xy_buttons = atoi(value);
+  else if (!strcmp(name, "volume"))
+    config.volume = (float)atof(value);
   else if (!strcmp(name, "debug_log"))
     config.debug_log = atoi(value);
   // unknown keys (old files) are ignored and dropped on the next rewrite
@@ -150,7 +154,7 @@ int write_config(const char *file)
           "#   Lower is faster but softer. 1.00 renders at full screen resolution with\n"
           "#   no extra scaling pass.\n"
           "#   Valid values: 0.50 to 1.00 (decimals allowed, e.g. 0.60, 0.85)\n"
-          "#   Default: 0.90\n"
+          "#   Default: 1.00\n"
           "render_scale %.2f\n"
           "\n"
           "# clarity\n"
@@ -202,6 +206,14 @@ int write_config(const char *file)
           "#   Default: 0\n"
           "swap_xy_buttons %d\n"
           "\n"
+          "# volume\n"
+          "#   Loudness of all game audio (music, speech, effects) as a multiple of the\n"
+          "#   game's own level, on top of the system volume. Above 1.00 a limiter keeps\n"
+          "#   loud moments from crackling; lower it if loud scenes sound squashed.\n"
+          "#   Valid values: 0.50 to 4.00 (decimals allowed, e.g. 1.50, 2.50)\n"
+          "#   Default: 2.00\n"
+          "volume %.2f\n"
+          "\n"
           "# debug_log\n"
           "#   Writes detailed technical tracing (graphics calls, file access, thread\n"
           "#   hand-offs) to bully.log. Only useful when tracking down a bug: the log\n"
@@ -212,7 +224,7 @@ int write_config(const char *file)
           "debug_log %d\n",
           config.render_scale, config.clarity, config.shadows, config.trilinear_filter,
           config.language, config.crouch_toggle,
-          config.swap_ab_buttons, config.swap_xy_buttons, config.debug_log);
+          config.swap_ab_buttons, config.swap_xy_buttons, config.volume, config.debug_log);
 
   if (fclose(f) != 0 || rename(tmp, file) != 0)
   {

@@ -21,6 +21,7 @@
 
 #include "../util.h"
 #include "../so_util.h"
+#include "../config.h"
 
 static ALCcontext *al_ctx = NULL;
 static ALCdevice *al_dev = NULL;
@@ -34,6 +35,17 @@ static int al_audio_disabled = 0;
 static int al_playback_enabled = 0;
 static ALuint al_pending_play_sources[256];
 static size_t al_pending_play_count = 0;
+
+#ifndef ALC_OUTPUT_LIMITER_SOFT
+#define ALC_OUTPUT_LIMITER_SOFT 0x199A // ALC_SOFT_output_limiter
+#endif
+
+// config.txt volume: master gain of the current context (context state, so
+// set again whenever a context becomes current)
+static void al_apply_volume(void)
+{
+  alListenerf(AL_GAIN, config.volume);
+}
 
 #define OPENAL_GUARD_VOID(tag)            \
   do                                      \
@@ -196,7 +208,7 @@ void openal_set_runtime_enabled(int enabled)
 
   if (!al_ctx)
   {
-    const ALCint attr[] = { ALC_FREQUENCY, 44100, 0 };
+    const ALCint attr[] = { ALC_FREQUENCY, 44100, ALC_OUTPUT_LIMITER_SOFT, ALC_TRUE, 0 };
     al_ctx = alcCreateContext(al_dev, attr);
   }
 
@@ -216,7 +228,8 @@ void openal_set_runtime_enabled(int enabled)
     pthread_mutex_unlock(&al_lock);
     return;
   }
-
+  al_apply_volume();
+  
   al_playback_enabled = 1;
   if (al_pending_play_count > 0)
   {
@@ -249,7 +262,7 @@ ALCcontext *alcCreateContextHook(ALCdevice *dev, const ALCint *unused) {
     return al_ctx;
   }
   // override 22050hz with 44100hz in case someone wants high quality sounds
-  const ALCint attr[] = { ALC_FREQUENCY, 44100, 0 };
+  const ALCint attr[] = { ALC_FREQUENCY, 44100, ALC_OUTPUT_LIMITER_SOFT, ALC_TRUE, 0 };
   al_dev = dev;
   al_ctx = alcCreateContext(dev, attr); // capture context for later deinit
   pthread_mutex_unlock(&al_lock);
@@ -297,6 +310,8 @@ ALCboolean alcMakeContextCurrentHook(ALCcontext *ctx) {
       al_ctx = cur;
       al_dev = alcGetContextsDevice(cur);
     }
+    if (ctx)
+      al_apply_volume();
   }
   pthread_mutex_unlock(&al_lock);
   return ret;

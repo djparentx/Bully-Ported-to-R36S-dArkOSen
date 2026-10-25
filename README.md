@@ -64,6 +64,7 @@ The file is created on the first start and rewritten from its template on every 
 | `crouch_toggle` | 0 hold / 1 toggle | 0 | How R3 crouch works. |
 | `swap_ab_buttons` | 0 / 1 | 0 | Swaps the bottom and right face buttons. |
 | `swap_xy_buttons` | 0 / 1 | 0 | Swaps the left and top face buttons. |
+| `volume` | 0.50–4.00 | 2.00 | Loudness of all game audio as a multiple of the game's own level. A limiter keeps it from clipping. |
 | `debug_log` | 0 / 1 | 0 | Detailed tracing in `bully.log`. Only for bug hunting: it slows the game and the log grows fast. |
 
 The game's own menu settings for resolution, effects and shadows are replaced by the `config.txt` values on the next start.

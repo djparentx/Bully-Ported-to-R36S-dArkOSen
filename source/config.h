@@ -35,6 +35,7 @@ typedef struct {
   int crouch_toggle;
   int swap_ab_buttons;
   int swap_xy_buttons;
+  float volume;
   int debug_log;
 } Config;
 
