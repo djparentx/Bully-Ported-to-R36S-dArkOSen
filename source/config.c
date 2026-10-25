@@ -169,7 +169,7 @@ int write_config(const char *file)
           "#   Shadow quality. Shadows are one of the most expensive features on this GPU.\n"
           "#   If the game reports a lower maximum for this device, the value is capped to it.\n"
           "#   Valid values: 0 = Off, 1 = Low, 2 = Medium, 3 = High\n"
-          "#   Default: 2\n"
+          "#   Default: 3\n"
           "shadows %d\n"
           "\n"
           "# trilinear_filter\n"
