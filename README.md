@@ -1,8 +1,17 @@
+[<img width="150" height="50" alt="ChatGPT Image Aug 12, 2026, 02_04_12 PM" img align="right"  src="https://github.com/user-attachments/assets/7eb7b583-5d57-4884-ae90-ad7127d733c4" alt="Right aligned" />](https://ko-fi.com/O8Z424G15Y)
 # Bully: Anniversary Edition for dArkOSen (RK3326)
 
 A port of the Android release of **Bully: Anniversary Edition** to RK3326 handhelds running dArkOSen (R36S and similar).
 
 This project does not reimplement the game. It loads the original Android native game library, patches it at runtime, and runs it on Linux with SDL2, OpenGL ES 3 (Mali-G31) and OpenAL. It is based on bully-NX, the Nintendo Switch port.
+
+<p align=center>
+<img width="320" height="240" alt="screenshot-20261024-144651" src="https://github.com/user-attachments/assets/d8ac9eb6-12c7-4736-ae86-0a014ddb380d" />
+<img width="320" height="240" alt="screenshot-20261024-144809" src="https://github.com/user-attachments/assets/e17dd1b2-decf-486d-87ca-fa52273f47c6" />
+<img width="320" height="240" alt="screenshot-20261024-145333" src="https://github.com/user-attachments/assets/1692584b-f8a3-41e4-89a1-59eb686615e8" />
+<img width="320" height="240" alt="screenshot-20261024-145621" src="https://github.com/user-attachments/assets/2048ad9a-5c35-4ffe-86e5-0f6a8e11600a" />
+<img width="320" height="240" alt="screenshot-20261024-145427" src="https://github.com/user-attachments/assets/07be7ecb-dbe8-4f3c-a9dc-6e6ee34b5e84" />
+</p>
 
 ## Important
 
