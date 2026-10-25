@@ -24,7 +24,7 @@ static void config_defaults(void)
 {
   config.render_scale = 1.00f;
   config.clarity = 2;
-  config.shadows = 2;
+  config.shadows = 3;
   config.trilinear_filter = 1;
   config.language = 0;
   config.crouch_toggle = 0;
