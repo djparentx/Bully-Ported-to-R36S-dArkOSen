@@ -22,11 +22,10 @@ int screen_height = 0;
 
 static void config_defaults(void)
 {
-  config.render_scale = 0.75f;
-  config.clarity = 0;
+  config.render_scale = 1.00f;
+  config.clarity = 1;
   config.shadows = 0;
-  config.trilinear_filter = 0;
-  config.disable_mipmaps = 0;
+  config.trilinear_filter = 1;
   config.language = 0;
   config.crouch_toggle = 0;
   config.swap_ab_buttons = 0;
@@ -50,7 +49,6 @@ static void config_clamp(void)
   config.clarity = clamp_int(config.clarity, 0, 2);
   config.shadows = clamp_int(config.shadows, 0, 3);
   config.trilinear_filter = clamp_int(config.trilinear_filter, 0, 1);
-  config.disable_mipmaps = clamp_int(config.disable_mipmaps, 0, 1);
   config.language = clamp_int(config.language, 0, 6);
   config.crouch_toggle = clamp_int(config.crouch_toggle, 0, 1);
   config.swap_ab_buttons = clamp_int(config.swap_ab_buttons, 0, 1);
@@ -68,8 +66,6 @@ static void parse_var(const char *name, const char *value)
     config.shadows = atoi(value);
   else if (!strcmp(name, "trilinear_filter"))
     config.trilinear_filter = atoi(value);
-  else if (!strcmp(name, "disable_mipmaps"))
-    config.disable_mipmaps = atoi(value);
   else if (!strcmp(name, "language"))
     config.language = atoi(value);
   else if (!strcmp(name, "crouch_toggle"))
@@ -154,7 +150,7 @@ int write_config(const char *file)
           "#   Lower is faster but softer. 1.00 renders at full screen resolution with\n"
           "#   no extra scaling pass.\n"
           "#   Valid values: 0.50 to 1.00 (decimals allowed, e.g. 0.60, 0.85)\n"
-          "#   Default: 0.75\n"
+          "#   Default: 1.00\n"
           "render_scale %.2f\n"
           "\n"
           "# clarity\n"
@@ -162,7 +158,7 @@ int write_config(const char *file)
           "#   the amount of post-processing effects. Applies on top of render_scale.\n"
           "#   Higher looks better and costs GPU time.\n"
           "#   Valid values: 0 = Low, 1 = Medium, 2 = High\n"
-          "#   Default: 0\n"
+          "#   Default: 1\n"
           "clarity %d\n"
           "\n"
           "# shadows\n"
@@ -176,16 +172,8 @@ int write_config(const char *file)
           "#   Smooths the transition between texture detail levels (removes visible\n"
           "#   \"bands\" on floors and roads). Small GPU cost.\n"
           "#   Valid values: 0 = off (game default), 1 = on\n"
-          "#   Default: 0\n"
+          "#   Default: 1\n"
           "trilinear_filter %d\n"
-          "\n"
-          "# disable_mipmaps\n"
-          "#   Uploads only the full-size version of each compressed texture and skips\n"
-          "#   the smaller copies. Saves some memory and load time, but distant textures\n"
-          "#   shimmer and can be slower to draw. Experimental.\n"
-          "#   Valid values: 0 = off (normal), 1 = on\n"
-          "#   Default: 0\n"
-          "disable_mipmaps %d\n"
           "\n"
           "# language\n"
           "#   Language of the game's text (menus, subtitles, mission text).\n"
@@ -223,7 +211,7 @@ int write_config(const char *file)
           "#   Default: 0\n"
           "debug_log %d\n",
           config.render_scale, config.clarity, config.shadows, config.trilinear_filter,
-          config.disable_mipmaps, config.language, config.crouch_toggle,
+          config.language, config.crouch_toggle,
           config.swap_ab_buttons, config.swap_xy_buttons, config.debug_log);
 
   if (fclose(f) != 0 || rename(tmp, file) != 0)

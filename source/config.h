@@ -31,7 +31,6 @@ typedef struct {
   int clarity;
   int shadows;
   int trilinear_filter;
-  int disable_mipmaps;
   int language;
   int crouch_toggle;
   int swap_ab_buttons;

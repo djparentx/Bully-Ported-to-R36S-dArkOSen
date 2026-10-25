@@ -47,11 +47,10 @@ The file is created on the first start and rewritten from its template on every 
 
 | Key | Values | Default | What it does |
 |---|---|---|---|
-| `render_scale` | 0.50–1.00 | 0.75 | Fraction of the screen resolution the game renders at, scaled up in one filtered pass. Lower is faster, higher is sharper. |
-| `clarity` | 0 Low, 1 Medium, 2 High | 0 | The game's own quality preset: internal resolution level and post-processing. |
+| `render_scale` | 0.50–1.00 | 1.00 | Fraction of the screen resolution the game renders at, scaled up in one filtered pass. Lower is faster, higher is sharper. |
+| `clarity` | 0 Low, 1 Medium, 2 High | 1 | The game's own quality preset: internal resolution level and post-processing. |
 | `shadows` | 0 Off – 3 High | 0 | Shadow quality. Expensive on this GPU. |
-| `trilinear_filter` | 0 / 1 | 0 | Smoother transitions between texture detail levels. |
-| `disable_mipmaps` | 0 / 1 | 0 | Experimental. Skips the smaller texture copies. |
+| `trilinear_filter` | 0 / 1 | 1 | Smoother transitions between texture detail levels. |
 | `language` | 0 English, 1 Spanish, 2 French, 3 German, 4 Italian, 5 Japanese, 6 Russian | 0 | Game text language. |
 | `crouch_toggle` | 0 hold / 1 toggle | 0 | How R3 crouch works. |
 | `swap_ab_buttons` | 0 / 1 | 0 | Swaps the bottom and right face buttons. |

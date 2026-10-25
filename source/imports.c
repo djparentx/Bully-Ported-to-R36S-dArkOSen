@@ -1997,13 +1997,6 @@ void glGetShaderInfoLogHook(GLuint shader, GLsizei maxLength, GLsizei *length, G
   debugPrintf("shader info log:\n%s\n", infoLog);
 }
 
-void glCompressedTexImage2DHook(GLenum target, GLint level, GLenum format, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const void *data)
-{
-  // don't upload mips
-  if (level == 0)
-    glCompressedTexImage2D(target, level, format, width, height, border, imageSize, data);
-}
-
 void glTexParameteriHook(GLenum target, GLenum param, GLint val)
 {
   // force trilinear filtering instead of bilinear+nearest mipmap
@@ -2654,8 +2647,6 @@ void update_imports(void)
   bsd_ctype_init();
 
   // only use the hooks if the relevant config options are enabled to avoid possible overhead
-  if (config.disable_mipmaps)
-    so_find_import(dynlib_functions, dynlib_numfunctions, "glCompressedTexImage2D")->func = (uintptr_t)glCompressedTexImage2DHook;
   if (config.trilinear_filter)
     so_find_import(dynlib_functions, dynlib_numfunctions, "glTexParameteri")->func = (uintptr_t)glTexParameteriHook;
 }
