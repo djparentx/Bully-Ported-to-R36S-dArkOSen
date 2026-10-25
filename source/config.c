@@ -22,8 +22,8 @@ int screen_height = 0;
 
 static void config_defaults(void)
 {
-  config.render_scale = 1.00f;
-  config.clarity = 1;
+  config.render_scale = 0.90f;
+  config.clarity = 2;
   config.shadows = 0;
   config.trilinear_filter = 1;
   config.language = 0;
@@ -150,7 +150,7 @@ int write_config(const char *file)
           "#   Lower is faster but softer. 1.00 renders at full screen resolution with\n"
           "#   no extra scaling pass.\n"
           "#   Valid values: 0.50 to 1.00 (decimals allowed, e.g. 0.60, 0.85)\n"
-          "#   Default: 1.00\n"
+          "#   Default: 0.90\n"
           "render_scale %.2f\n"
           "\n"
           "# clarity\n"
@@ -158,7 +158,7 @@ int write_config(const char *file)
           "#   the amount of post-processing effects. Applies on top of render_scale.\n"
           "#   Higher looks better and costs GPU time.\n"
           "#   Valid values: 0 = Low, 1 = Medium, 2 = High\n"
-          "#   Default: 1\n"
+          "#   Default: 2\n"
           "clarity %d\n"
           "\n"
           "# shadows\n"
