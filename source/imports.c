@@ -2395,7 +2395,7 @@ DynLibFunction dynlib_functions[] = {
     {"glDeleteProgram", (uintptr_t)&glDeleteProgram},
     {"glDeleteRenderbuffers", (uintptr_t)&glDeleteRenderbuffers},
     {"glDeleteShader", (uintptr_t)&glDeleteShader},
-    {"glDeleteTextures", (uintptr_t)&texconv_glDeleteTextures},
+    {"glDeleteTextures", (uintptr_t)&glDeleteTextures},
     {"glDepthFunc", (uintptr_t)&glDepthFunc},
     {"glDepthMask", (uintptr_t)&glDepthMask},
     {"glDepthRangef", (uintptr_t)&glDepthRangef},
