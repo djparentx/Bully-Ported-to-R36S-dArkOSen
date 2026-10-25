@@ -24,13 +24,13 @@ static void config_defaults(void)
 {
   config.render_scale = 1.00f;
   config.clarity = 2;
-  config.shadows = 0;
+  config.shadows = 2;
   config.trilinear_filter = 1;
   config.language = 0;
   config.crouch_toggle = 0;
   config.swap_ab_buttons = 0;
   config.swap_xy_buttons = 0;
-  config.volume = 2.00f;
+  config.volume = 2.50f;
   config.debug_log = 0;
 }
 
@@ -169,7 +169,7 @@ int write_config(const char *file)
           "#   Shadow quality. Shadows are one of the most expensive features on this GPU.\n"
           "#   If the game reports a lower maximum for this device, the value is capped to it.\n"
           "#   Valid values: 0 = Off, 1 = Low, 2 = Medium, 3 = High\n"
-          "#   Default: 0\n"
+          "#   Default: 2\n"
           "shadows %d\n"
           "\n"
           "# trilinear_filter\n"
@@ -211,7 +211,7 @@ int write_config(const char *file)
           "#   game's own level, on top of the system volume. Above 1.00 a limiter keeps\n"
           "#   loud moments from crackling; lower it if loud scenes sound squashed.\n"
           "#   Valid values: 0.50 to 4.00 (decimals allowed, e.g. 1.50, 2.50)\n"
-          "#   Default: 2.00\n"
+          "#   Default: 2.50\n"
           "volume %.2f\n"
           "\n"
           "# debug_log\n"
