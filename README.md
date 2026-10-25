@@ -57,14 +57,14 @@ The file is created on the first start and rewritten from its template on every 
 | Key | Values | Default | What it does |
 |---|---|---|---|
 | `render_scale` | 0.50–1.00 | 1.00 | Fraction of the screen resolution the game renders at, scaled up in one filtered pass. Lower is faster, higher is sharper. |
-| `clarity` | 0 Low, 1 Medium, 2 High | 1 | The game's own quality preset: internal resolution level and post-processing. |
-| `shadows` | 0 Off – 3 High | 0 | Shadow quality. Expensive on this GPU. |
+| `clarity` | 0 Low, 1 Medium, 2 High | 2 | The game's own quality preset: internal resolution level and post-processing. |
+| `shadows` | 0 Off – 3 High | 3 | Shadow quality. Expensive on this GPU. |
 | `trilinear_filter` | 0 / 1 | 1 | Smoother transitions between texture detail levels. |
 | `language` | 0 English, 1 Spanish, 2 French, 3 German, 4 Italian, 5 Japanese, 6 Russian | 0 | Game text language. |
 | `crouch_toggle` | 0 hold / 1 toggle | 0 | How R3 crouch works. |
 | `swap_ab_buttons` | 0 / 1 | 0 | Swaps the bottom and right face buttons. |
 | `swap_xy_buttons` | 0 / 1 | 0 | Swaps the left and top face buttons. |
-| `volume` | 0.50–4.00 | 2.00 | Loudness of all game audio as a multiple of the game's own level. A limiter keeps it from clipping. |
+| `volume` | 0.50–4.00 | 2.50 | Loudness of all game audio as a multiple of the game's own level. A limiter keeps it from clipping. |
 | `debug_log` | 0 / 1 | 0 | Detailed tracing in `bully.log`. Only for bug hunting: it slows the game and the log grows fast. |
 
 The game's own menu settings for resolution, effects and shadows are replaced by the `config.txt` values on the next start.
