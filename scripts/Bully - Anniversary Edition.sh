@@ -156,21 +156,26 @@ export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export ALSOFT_DRIVERS=alsa
 
-# the handheld's controls from PortMaster; fallback is the GO-Super Gamepad mapping
-for d in /opt/system/Tools/PortMaster /opt/tools/PortMaster /roms/tools/PortMaster /roms2/tools/PortMaster /roms/ports/PortMaster /roms2/ports/PortMaster; do
-	if [ -f "$d/control.txt" ]; then
-		controlfolder="$d"
-		source "$d/control.txt"
-		get_controls
-		break
-	fi
-done
-if [ -n "$sdl_controllerconfig" ]; then
+# the handheld's controls: PortMaster's standard port setup, as every PortMaster port does it
+XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}
+
+if [ -d "/opt/system/Tools/PortMaster/" ]; then
+	controlfolder="/opt/system/Tools/PortMaster"
+elif [ -d "/opt/tools/PortMaster/" ]; then
+	controlfolder="/opt/tools/PortMaster"
+elif [ -d "$XDG_DATA_HOME/PortMaster/" ]; then
+	controlfolder="$XDG_DATA_HOME/PortMaster"
+else
+	controlfolder="/roms/ports/PortMaster"
+fi
+
+if [ -f "$controlfolder/control.txt" ]; then
+	source "$controlfolder/control.txt"
+	[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
+	get_controls
 	export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
-elif [ -z "$SDL_GAMECONTROLLERCONFIG" ]; then
-	_MAP="a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,leftx:a0,lefty:a1,rightx:a2,righty:a3,leftstick:b14,rightstick:b15,lefttrigger:b6,righttrigger:b7,back:b12,start:b13,"
-	export SDL_GAMECONTROLLERCONFIG="190000004b4800000010000000010000,GO-Super Gamepad,$_MAP
-1900bb3e4b4800000011000000010000,GO-Super Gamepad,$_MAP"
+else
+	controlfolder=""
 fi
 
 echo "Bully for dArkOSen, $(date)"
@@ -187,7 +192,7 @@ kv "dmc devfreq"      "${DMC:-none}"
 kv "dmc min/max/cur"  "$(rd "$DMC/min_freq") / $(rd "$DMC/max_freq") / $(rd "$DMC/cur_freq")"
 kv "SDL_VIDEODRIVER"  "$SDL_VIDEODRIVER"
 kv "SDL_AUDIODRIVER"  "$SDL_AUDIODRIVER"
-kv "controls"         "${controlfolder:-fallback mapping}"
+kv "controls"         "${controlfolder:-PortMaster not found}"
 kv "zram"             "$(rd "$ZRAM/disksize") bytes, $(zram_algo), priority $(zram_prio)"
 kv "swappiness"       "$(rd /proc/sys/vm/swappiness)"
 
