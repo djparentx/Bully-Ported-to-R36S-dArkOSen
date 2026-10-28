@@ -177,6 +177,13 @@ else
 	controlfolder=""
 fi
 
+export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-}"
+
+# PortMaster's per-firmware input setup, as the standard ports call it
+if command -v pm_platform_helper > /dev/null 2>&1; then
+	pm_platform_helper "$GAMEDIR/bully"
+fi
+
 echo "Bully for dArkOSen, $(date)"
 kv "device"           "$(cat /home/ark/.config/.DEVICE 2> /dev/null)"
 kv "kernel"           "$(uname -sr)"
