@@ -173,7 +173,6 @@ if [ -f "$controlfolder/control.txt" ]; then
 	source "$controlfolder/control.txt"
 	[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 	get_controls
-	export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 else
 	controlfolder=""
 fi
