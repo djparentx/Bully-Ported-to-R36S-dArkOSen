@@ -103,7 +103,7 @@ int video_open(void)
     void *egl_fn = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
 
     if (egl_fn && dladdr(egl_fn, &egl_info) && egl_info.dli_fname)
-      SDL_SetHintWithPriority(SDL_HINT_VIDEO_EGL_DRIVER, egl_info.dli_fname, SDL_HINT_OVERRIDE);
+      setenv("SDL_VIDEO_EGL_DRIVER", egl_info.dli_fname, 1);
   }
   
   if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
