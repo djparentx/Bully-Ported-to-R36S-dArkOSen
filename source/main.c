@@ -90,6 +90,22 @@ static void crash_handler(int sig, siginfo_t *si, void *ucv)
   char buf[160];
   int n, found = 0;
 
+  // a SIGSEGV this process sent to itself (raise/tgkill) is not a memory
+  // fault: note it, keep the handler armed and let the thread carry on
+  if (sig == SIGSEGV && si->si_code <= 0 && si->si_pid == getpid())
+  {
+    static const char msg[] = "[CRASH] ignored a SIGSEGV the process sent to itself\n";
+    struct sigaction again;
+
+    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    memset(&again, 0, sizeof(again));
+    again.sa_sigaction = crash_handler;
+    again.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&again.sa_mask);
+    sigaction(SIGSEGV, &again, NULL);
+    return;
+  }
+  
   fflush(stdout);
 
   n = snprintf(buf, sizeof(buf), "[CRASH] signal=%d fault_addr=0x%lx sp=0x%lx\n",

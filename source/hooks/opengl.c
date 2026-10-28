@@ -6,9 +6,13 @@
  * of the MIT license.  See the LICENSE file for details.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
 #include <SDL2/SDL.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -91,6 +95,17 @@ int video_open(void)
   if (s_window)
     return 1;
 
+  // SDL must create its context in the same libEGL this program calls
+  // (eglGetCurrentDisplay, eglChooseConfig, ...). Other firmwares can point
+  // SDL at a different one, which leaves our copy with no display.
+  {
+    Dl_info egl_info;
+    void *egl_fn = dlsym(RTLD_DEFAULT, "eglGetCurrentDisplay");
+
+    if (egl_fn && dladdr(egl_fn, &egl_info) && egl_info.dli_fname)
+      SDL_SetHintWithPriority(SDL_HINT_VIDEO_EGL_DRIVER, egl_info.dli_fname, SDL_HINT_OVERRIDE);
+  }
+  
   if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
   {
     logPrintf("video: SDL video init failed: %s\n", SDL_GetError());
