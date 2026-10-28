@@ -23,7 +23,7 @@ int screen_height = 0;
 static void config_defaults(void)
 {
   config.render_scale = 1.00f;
-  config.scene_scale = 0.00f;
+  config.scene_scale = 1.00f;
   config.clarity = 2;
   config.shadows = 3;
   config.trilinear_filter = 1;
@@ -168,7 +168,7 @@ int write_config(const char *file)
           "#   0 = automatic: full sharpness on small screens (640x480 and below),\n"
           "#   lower on larger ones to keep the frame rate.\n"
           "#   Valid values: 0 (auto), or 0.50 to 1.00\n"
-          "#   Default: 0\n"
+          "#   Default: 1.00\n"
           "scene_scale %.2f\n"
           "\n"
           "# clarity\n"
