@@ -14,6 +14,9 @@
 #include <stdio.h>
 #include <signal.h>
 #include <ucontext.h>
+#include <fcntl.h>
+#include <sys/prctl.h>
+#include <sys/syscall.h>
 
 #include "config.h"
 #include "util.h"
@@ -80,24 +83,112 @@ static void crash_addr(const char *what, uintptr_t addr)
   write(STDERR_FILENO, buf, n);
 }
 
-// Fatal signals: where it happened, then return addresses found on the stack
-// that point into the game's code (innermost first), then die
+// the /proc/self/maps line that holds addr: names the library or mapping
+static void crash_map(const char *what, uintptr_t addr)
+{
+  static char maps[1 << 18];
+  size_t len = 0;
+  ssize_t r;
+  int fd = open("/proc/self/maps", O_RDONLY);
+  char *line, *next, *eol, *end;
+  char head[32];
+  int n;
+
+  if (fd < 0)
+    return;
+  while (len < sizeof(maps) - 1 && (r = read(fd, maps + len, sizeof(maps) - 1 - len)) > 0)
+    len += (size_t)r;
+  close(fd);
+  maps[len] = '\0';
+
+  n = snprintf(head, sizeof(head), "[CRASH] map   %-5s ", what);
+  for (line = maps; *line; line = next)
+  {
+    uintptr_t lo, hi;
+
+    eol = strchr(line, '\n');
+    next = eol ? eol + 1 : line + strlen(line);
+    if (eol)
+      *eol = '\0';
+    lo = strtoul(line, &end, 16);
+    if (*end != '-')
+      continue;
+    hi = strtoul(end + 1, &end, 16);
+    if (addr >= lo && addr < hi)
+    {
+      write(STDERR_FILENO, head, n);
+      write(STDERR_FILENO, line, strlen(line));
+      write(STDERR_FILENO, "\n", 1);
+      return;
+    }
+  }
+  write(STDERR_FILENO, head, n);
+  write(STDERR_FILENO, "(not mapped)\n", 13);
+}
+
+static void crash_regs(const ucontext_t *uc)
+{
+  char buf[160];
+  int n;
+
+  for (int i = 0; i < 31; i += 3)
+  {
+    n = snprintf(buf, sizeof(buf), "[CRASH] x%-2d=%016lx", i, (unsigned long)uc->uc_mcontext.regs[i]);
+    for (int j = i + 1; j < i + 3 && j < 31; j++)
+      n += snprintf(buf + n, sizeof(buf) - n, "  x%-2d=%016lx", j, (unsigned long)uc->uc_mcontext.regs[j]);
+    buf[n++] = '\n';
+    write(STDERR_FILENO, buf, n);
+  }
+}
+
+static void crash_header(int sig, const siginfo_t *si, const ucontext_t *uc, const char *kind)
+{
+  char name[16] = "?", buf[256];
+  int n;
+
+  prctl(PR_GET_NAME, (unsigned long)name, 0, 0, 0);
+  if (si->si_code > 0)
+    n = snprintf(buf, sizeof(buf),
+                 "[CRASH] %s signal=%d code=%d fault_addr=0x%lx thread=%s tid=%ld sp=0x%lx\n",
+                 kind, sig, si->si_code, (unsigned long)si->si_addr, name,
+                 (long)syscall(SYS_gettid), (unsigned long)uc->uc_mcontext.sp);
+  else
+    n = snprintf(buf, sizeof(buf),
+                 "[CRASH] %s signal=%d code=%d sent_by_pid=%d uid=%u thread=%s tid=%ld sp=0x%lx\n",
+                 kind, sig, si->si_code, (int)si->si_pid, (unsigned)si->si_uid, name,
+                 (long)syscall(SYS_gettid), (unsigned long)uc->uc_mcontext.sp);
+  write(STDERR_FILENO, buf, n);
+}
+
+// Fatal signals: header, pc/lr with their library, registers, then (fatal only)
+// the frame-pointer backtrace and return addresses found on the stack that point
+// into the game's code (innermost first), then die
 static void crash_handler(int sig, siginfo_t *si, void *ucv)
 {
+  static int s_ignored = 0;
   ucontext_t *uc = (ucontext_t *)ucv;
   uintptr_t sp = (uintptr_t)uc->uc_mcontext.sp;
   const uintptr_t *stack = (const uintptr_t *)sp;
-  char buf[160];
-  int n, found = 0;
+  int found = 0;
+  // a SIGSEGV this process sent to itself (raise/tgkill) is not a memory fault:
+  // report it, keep the handler armed and let the thread carry on (3 times at most)
+  int self_sent = sig == SIGSEGV && si->si_code <= 0 && si->si_pid == getpid() && s_ignored < 3;
 
-  // a SIGSEGV this process sent to itself (raise/tgkill) is not a memory
-  // fault: note it, keep the handler armed and let the thread carry on
-  if (sig == SIGSEGV && si->si_code <= 0 && si->si_pid == getpid())
+  fflush(stdout);
+  crash_header(sig, si, uc, self_sent ? "self-sent (ignored)" : "fatal");
+  crash_addr("pc", (uintptr_t)uc->uc_mcontext.pc);
+  crash_addr("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
+  crash_map("pc", (uintptr_t)uc->uc_mcontext.pc);
+  crash_map("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
+  if (si->si_code > 0)
+    crash_map("fault", (uintptr_t)si->si_addr);
+  crash_regs(uc);
+
+  if (self_sent)
   {
-    static const char msg[] = "[CRASH] ignored a SIGSEGV the process sent to itself\n";
     struct sigaction again;
 
-    write(STDERR_FILENO, msg, sizeof(msg) - 1);
+    s_ignored++;
     memset(&again, 0, sizeof(again));
     again.sa_sigaction = crash_handler;
     again.sa_flags = SA_SIGINFO | SA_RESETHAND;
@@ -105,14 +196,6 @@ static void crash_handler(int sig, siginfo_t *si, void *ucv)
     sigaction(SIGSEGV, &again, NULL);
     return;
   }
-  
-  fflush(stdout);
-
-  n = snprintf(buf, sizeof(buf), "[CRASH] signal=%d fault_addr=0x%lx sp=0x%lx\n",
-               sig, (unsigned long)si->si_addr, (unsigned long)sp);
-  write(STDERR_FILENO, buf, n);
-  crash_addr("pc", (uintptr_t)uc->uc_mcontext.pc);
-  crash_addr("lr", (uintptr_t)uc->uc_mcontext.regs[30]);
 
   // 32 KB of stack; if this runs off the mapped stack the second fault is
   // fatal (SA_RESETHAND), so it can't loop
@@ -122,6 +205,21 @@ static void crash_handler(int sig, siginfo_t *si, void *ucv)
     {
       crash_addr("stack", stack[i]);
       found++;
+    }
+  }
+
+  // frame-pointer chain: x29 -> {previous x29, return address}
+  {
+    uintptr_t fp = (uintptr_t)uc->uc_mcontext.regs[29];
+
+    for (int i = 0; i < 24 && fp >= sp && fp - sp < (1u << 20) && !(fp & 7); i++)
+    {
+      const uintptr_t *frame = (const uintptr_t *)fp;
+
+      crash_addr("bt", frame[1]);
+      if (frame[0] <= fp)
+        break;
+      fp = frame[0];
     }
   }
 
