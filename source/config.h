@@ -28,6 +28,7 @@ extern int screen_height;
 
 typedef struct {
   float render_scale;
+  float scene_scale;
   int clarity;
   int shadows;
   int trilinear_filter;

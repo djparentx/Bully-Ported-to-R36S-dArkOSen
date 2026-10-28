@@ -57,6 +57,7 @@ The file is created on the first start and rewritten from its template on every 
 | Key | Values | Default | What it does |
 |---|---|---|---|
 | `render_scale` | 0.50–1.00 | 1.00 | Fraction of the screen resolution the game renders at, scaled up in one filtered pass. Lower is faster, higher is sharper. |
+| `scene_scale` | 0 or 0.50–1.00 | 0 | Resolution of the 3D scene inside the frame (the HUD and text are not affected). 0 = automatic: full sharpness on small screens, lower on large ones to keep the frame rate. 1.00 = sharpest, 0.50 = the old behaviour. |
 | `clarity` | 0 Low, 1 Medium, 2 High | 2 | The game's own quality preset: internal resolution level and post-processing. |
 | `shadows` | 0 Off – 3 High | 3 | Shadow quality. Expensive on this GPU. |
 | `trilinear_filter` | 0 / 1 | 1 | Smoother transitions between texture detail levels. |

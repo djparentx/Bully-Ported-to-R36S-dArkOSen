@@ -1962,8 +1962,8 @@ static void OrigPretick_hook(void *this_ptr, int flag) {
 // - CGame::ms_bTidyTextureMemory is set on every area change and every 30 s,
 //   which makes the game release textures it no longer uses.
 // - malloc_trim(0) every 10 s and on area changes hands freed heap back.
-// - Renderer::SetEmergencyMeasures(level) is capped at 0.5 through the
-//   renderer vtables.
+// - Renderer::SetEmergencyMeasures(level) is the 3D scene's resolution scale;
+//   it is replaced by config.scene_scale through the renderer vtables.
 // ============================================================================
 #define TEXTURE_MEMORY_BUDGET (256ull * 1024 * 1024)
 #define EMERGENCY_MEASURES_SLOT 0xc8 // byte offset from the vtable symbol (entry 23)
@@ -1980,11 +1980,34 @@ static uint64_t TextureHeapHelper_GetTotalGraphicsMemoryOfSystem_hook(void)
   return TEXTURE_MEMORY_BUDGET;
 }
 
+// Renderer::SetEmergencyMeasures is the GPU resolution scale of the 3D scene
+// (BullyGameRenderer::SetupPostProcess sizes its render target with it). The
+// game asks for 0.5; scene_scale replaces that value. 0 = automatic: a budget of
+// about 640x480 scene pixels, so small panels render the scene at full size.
+static float scene_scale_value(void)
+{
+  float s = config.scene_scale;
+
+  if (s <= 0.0f)
+  {
+    float px = (float)screen_width * (float)screen_height;
+    s = px > 0.0f ? sqrtf(307200.0f / px) : 0.5f;
+  }
+  return s < 0.5f ? 0.5f : (s > 1.0f ? 1.0f : s);
+}
+
 static void Renderer_SetEmergencyMeasures_hook(void *this_ptr, float level)
 {
-  if (!(level <= 0.5f))
-    level = 0.5f;
-  Renderer_SetEmergencyMeasures_real(this_ptr, level);
+  static int s_logged = 0;
+  float scale = scene_scale_value();
+
+  if (!s_logged)
+  {
+    s_logged = 1;
+    logPrintf("video: scene scale %.2f (game asked %.2f, config %.2f)\n",
+              scale, level, config.scene_scale);
+  }
+  Renderer_SetEmergencyMeasures_real(this_ptr, scale);
 }
 
 static long vmrss_kb(void)

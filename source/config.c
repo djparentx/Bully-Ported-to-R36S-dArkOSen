@@ -23,6 +23,7 @@ int screen_height = 0;
 static void config_defaults(void)
 {
   config.render_scale = 1.00f;
+  config.scene_scale = 0.00f;
   config.clarity = 2;
   config.shadows = 3;
   config.trilinear_filter = 1;
@@ -47,6 +48,7 @@ static float clamp_float(float v, float lo, float hi)
 static void config_clamp(void)
 {
   config.render_scale = clamp_float(config.render_scale, 0.50f, 1.00f);
+  config.scene_scale = config.scene_scale <= 0.0f ? 0.0f : clamp_float(config.scene_scale, 0.50f, 1.00f);
   config.clarity = clamp_int(config.clarity, 0, 2);
   config.shadows = clamp_int(config.shadows, 0, 3);
   config.trilinear_filter = clamp_int(config.trilinear_filter, 0, 1);
@@ -62,6 +64,8 @@ static void parse_var(const char *name, const char *value)
 {
   if (!strcmp(name, "render_scale"))
     config.render_scale = (float)atof(value);
+  else if (!strcmp(name, "scene_scale"))
+    config.scene_scale = (float)atof(value);
   else if (!strcmp(name, "clarity"))
     config.clarity = atoi(value);
   else if (!strcmp(name, "shadows"))
@@ -157,6 +161,16 @@ int write_config(const char *file)
           "#   Default: 1.00\n"
           "render_scale %.2f\n"
           "\n"
+          "# scene_scale\n"
+          "#   Resolution of the 3D scene as a fraction of the render size (the HUD and\n"
+          "#   text are not affected). The game's own default is 0.50, which looks soft\n"
+          "#   on small screens.\n"
+          "#   0 = automatic: full sharpness on small screens (640x480 and below),\n"
+          "#   lower on larger ones to keep the frame rate.\n"
+          "#   Valid values: 0 (auto), or 0.50 to 1.00\n"
+          "#   Default: 0\n"
+          "scene_scale %.2f\n"
+          "\n"
           "# clarity\n"
           "#   The game's own display quality preset: its internal resolution level and\n"
           "#   the amount of post-processing effects. Applies on top of render_scale.\n"
@@ -222,7 +236,7 @@ int write_config(const char *file)
           "#   Valid values: 0 = off, 1 = on\n"
           "#   Default: 0\n"
           "debug_log %d\n",
-          config.render_scale, config.clarity, config.shadows, config.trilinear_filter,
+          config.render_scale, config.scene_scale, config.clarity, config.shadows, config.trilinear_filter,
           config.language, config.crouch_toggle,
           config.swap_ab_buttons, config.swap_xy_buttons, config.volume, config.debug_log);
 
