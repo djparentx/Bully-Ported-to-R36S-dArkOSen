@@ -62,7 +62,6 @@ extern void __cxa_guard_abort(int64_t *);
 extern void __cxa_pure_virtual(void);
 extern void __cxa_rethrow(void);
 extern int __cxa_thread_atexit(void (*)(void *), void *, void *);
-extern void *__dynamic_cast(const void *, const void *, const void *, long);
 extern void *__gxx_personality_v0;
 extern void terminate_wrapper(void);
 extern void _ZNSt9exceptionD2Ev(void *);
@@ -2190,7 +2189,6 @@ DynLibFunction dynlib_functions[] = {
     {"__cxa_rethrow", (uintptr_t)&__cxa_rethrow},
     {"__cxa_throw", (uintptr_t)&__cxa_throw_wrapper},
     {"__cxa_thread_atexit", (uintptr_t)&__cxa_thread_atexit},
-    {"__dynamic_cast", (uintptr_t)&__dynamic_cast},
     {"__gxx_personality_v0", (uintptr_t)&__gxx_personality_v0},
     {"__emutls_get_address", (uintptr_t)&__emutls_get_address_stub},
 
