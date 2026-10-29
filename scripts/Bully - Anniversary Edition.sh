@@ -36,7 +36,7 @@ put() {
 	echo "$1" | $SUDO tee "$2" > /dev/null 2>&1
 }
 
-# GPU: 600 MHz hangs the GPU under load on these boards (kernel hard-stop, ~8.7 s)
+# GPU: pin the GPU to 600 MHz
 GPU_MAX_HZ="${BULLY_GPU_MAX_HZ:-600000000}"
 
 lowest_step() { tr ' ' '\n' < "$1/available_frequencies" 2> /dev/null | grep . | sort -n | head -n 1; }
