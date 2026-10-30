@@ -36,38 +36,6 @@ put() {
 	echo "$1" | $SUDO tee "$2" > /dev/null 2>&1
 }
 
-# GPU: pin the GPU to 600 MHz
-GPU_MAX_HZ="${BULLY_GPU_MAX_HZ:-600000000}"
-
-lowest_step() { tr ' ' '\n' < "$1/available_frequencies" 2> /dev/null | grep . | sort -n | head -n 1; }
-
-# highest available step at or below $2 (the lowest step if none is)
-step_at_most() {
-	local steps target
-	steps=$(tr ' ' '\n' < "$1/available_frequencies" 2> /dev/null | grep . | sort -n)
-	target=$(echo "$steps" | awk -v max="$2" '$1 <= max { t = $1 } END { print t }')
-	[ -z "$target" ] && target=$(echo "$steps" | head -n 1)
-	echo "$target"
-}
-
-# devfreq node, frequency: min/max/min so it lands whichever way it moves
-pin() {
-	[ -n "$1" ] && [ -n "$2" ] || return
-	put "$2" "$1/min_freq"
-	put "$2" "$1/max_freq"
-	put "$2" "$1/min_freq"
-}
-
-# devfreq node, saved min, saved max
-unpin() {
-	[ -n "$1" ] || return
-	local low
-	low=$(lowest_step "$1")
-	[ -n "$low" ] && put "$low" "$1/min_freq"
-	[ -n "$3" ] && [ "$3" != none ] && put "$3" "$1/max_freq"
-	[ -n "$2" ] && [ "$2" != none ] && put "$2" "$1/min_freq"
-}
-
 # zram swap: forced to ZRAM_SIZE with high swappiness while the game runs, so
 # idle memory (EmulationStation) moves to compressed swap; put back on exit
 ZRAM=/sys/block/zram0
@@ -138,18 +106,16 @@ zram_restore() {
 
 restore() {
 	if [ -f "$SAVED" ]; then
-		read -r s_gov s_gpu_min s_gpu_max < "$SAVED"
+		read -r s_gov < "$SAVED"
 		[ -n "$s_gov" ] && [ "$s_gov" != none ] && put "$s_gov" "$CPU"
-		unpin "$GPU" "$s_gpu_min" "$s_gpu_max"
 		rm -f "$SAVED"
 	fi
 }
 restore
-echo "$(rd "$CPU") $(rd "$GPU/min_freq") $(rd "$GPU/max_freq")" > "$SAVED"
+echo "$(rd "$CPU")" > "$SAVED"
 trap 'restore; zram_restore' EXIT
 
 put performance "$CPU"
-[ -n "$GPU" ] && pin "$GPU" "$(step_at_most "$GPU" "$GPU_MAX_HZ")"
 zram_force
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"

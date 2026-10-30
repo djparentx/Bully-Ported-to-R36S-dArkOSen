@@ -75,12 +75,11 @@ The game's own menu settings for resolution, effects and shadows are replaced by
 Everything below is put back when the game exits, including after a crash:
 
 - CPU governor set to `performance`.
-- GPU pinned at 520 MHz. 600 MHz hangs the GPU under load on these boards.
 - zram swap resized to 768 MB and `vm.swappiness` set to 100, so idle memory moves to compressed swap and the game gets more RAM.
   - Resizing takes a few seconds before the game appears.
   - If the size is already 768 MB, nothing is resized.
 
-Override any of these from the environment: `BULLY_GPU_MAX_HZ`, `BULLY_ZRAM_SIZE` (bytes), `BULLY_SWAPPINESS`.
+Override any of these from the environment: `BULLY_ZRAM_SIZE` (bytes), `BULLY_SWAPPINESS`.
 
 ## Memory
 

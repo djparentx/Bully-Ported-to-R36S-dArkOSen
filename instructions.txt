@@ -76,8 +76,7 @@ Notes
   fails.
 - Saves and the game's settings are stored in ports/bully/savegames/.
   Saves left in ports/bully/ by older builds are moved there on the next start.
-- While the game runs, the launcher sets the CPU to performance, pins the GPU
-  at 520 MHz, and sets zram to 768 MB with swappiness 100. Everything is put
+- While the game runs, the launcher sets zram to 768 MB with swappiness 100. Everything is put
   back on exit.
 - If the game closes suddenly and bully.log ends with
   "Bully was killed (137)", it ran out of memory. Lower clarity or shadows,
